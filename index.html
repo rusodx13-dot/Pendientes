@@ -415,7 +415,7 @@ io = {
   setEstado: async (d, o) => { await escribir({a:"estadoSet", d, o}); estado[d] = o; render(); },
   stkSet: async m => { await escribir({a:"stkSet", m}); stk.push(m); render(); },
   stkDel: async id => { await escribir({a:"stkDel", id}); stk = stk.filter(x => x.id !== id); render(); },
-  facSet: async m => { await escribir({a:"facSet", m}); fman.push(m); render(); },
+  facSet: async m => { await escribir({a:"facSet", m}); fman = fman.filter(x => x.id !== m.id).concat([m]); render(); },
   facDel: async id => { await escribir({a:"facDel", id}); fman = fman.filter(x => x.id !== id); render(); },
 };
 function aplicarSesion(){
@@ -491,6 +491,9 @@ function derive(){
   grupos = aplicarPedidos(buildGrupos(mov), pedidos, fman);
   sinRet = sinRetirar(grupos, pedidos);
 }
+const ENV = {entregado:"Entregado", pendiente:"Pendiente de recibir", bloqueado:"Bloqueado", recibido:"Recibido"};
+const envDe = m => m.env || "entregado";
+const manEnv = e => fman.filter(m => envDe(m) === e);
 const pendFact = () => grupos.filter(g => g.neto > 0.0001);
 /* Pendiente de recibir = renglones de pedidos con factura que todavía no figuran como recibidos. Los renglones "entregado p/completo" ya se despacharon y los "no relev.p.entrega" no se tienen en cuenta. */
 const entregada = l => /entregado/i.test(l.st || "");
@@ -509,8 +512,8 @@ function prodsStock(){
   return Object.values(g).sort((a, b) => a.producto.localeCompare(b.producto));
 }
 function counts(){
-  return {recibir: pendRecLines().length, facturar: pendFact().length,
-    bloqueados: pedidos.filter(p => p.bloqueado).length, cyo: pedidos.length, normal: prodsStock().length};
+  return {recibir: pendRecLines().length + manEnv("pendiente").length, facturar: pendFact().length,
+    bloqueados: pedidos.filter(p => p.bloqueado).length + manEnv("bloqueado").length, cyo: pedidos.length, normal: prodsStock().length};
 }
 function renderTabs(){
   const c = counts();
@@ -553,37 +556,51 @@ function viewModel(q){
   if(view === "recibir"){
     const fe = $("fEnt").value;
     const list = pendRecLines().filter(x => (!fe || (fe === "parcial" ? /parcial/i : fe === "nosum" ? /no suministrado/i : /no relev/i).test(x.l.st || "")) && matchQ(q, [x.p.ref, x.p.d, x.p.cli, x.l.pr]));
+    const man = fe ? [] : manEnv("pendiente").filter(m => matchQ(q, [m.fac, m.c, m.a]));
+    const filasMan = man.map(m => ({cls:"",
+      cells:[`<span class="mono">${esc(m.fac)}</span>`, `<span class="mono">Manual</span>`, `<span class="mono">${fmtDate(m.f)}</span>`, esc(m.c), esc(m.a),
+        `<span class="mono">${fmtN(m.q)}</span>`, `<span class="mono">0</span>`, `<span class="mono">${fmtN(m.q)}</span>`, `<span class="pill mute">Carga manual</span>`, `<span class="pill warn">Pendiente</span>`,
+        `<div class="rowact"><button class="btn small" data-a="manrecibir" data-id="${esc(m.id)}">Recibir</button><button class="btn small danger" data-a="deshacerfac" data-id="${esc(m.id)}">Deshacer</button></div>`],
+      text:[m.fac, "Manual", fmtDate(m.f), m.c, m.a, m.q, 0, m.q, "Carga manual", "Pendiente"]}));
     return {
       head:["Factura","Pedido","Fecha","Cliente","Producto","Pedida","Entregada","Pend. entrega","Estado de entrega","Despacho","Acciones"], numCols:[5,6,7], noExport:[10],
-      rows:list.map(({p, l, first}) => ({cls:p.bloqueado ? "blocked" : "",
+      rows:filasMan.concat(list.map(({p, l, first}) => ({cls:p.bloqueado ? "blocked" : "",
         cells:[`<span class="mono">${esc(p.ref)}</span>`, `<span class="mono">${esc(p.d)}</span>`, `<span class="mono">${fmtDate(p.cr)}</span>`, esc(p.cli), esc(l.pr),
           `<span class="mono">${fmtN(l.q)} ${esc(l.um)}</span>`, `<span class="mono">${fmtN(l.qe)}</span>`, `<span class="mono">${fmtN(l.pe)}</span>`, estPill(l), despCell(p),
           first ? pedActions(p) : `<span class="age">Mismo pedido</span>`],
-        text:[p.ref, p.d, fmtDate(p.cr), p.cli, l.pr, l.q + " " + l.um, l.qe, l.pe, l.st, p.bloqueado ? "Bloqueado: " + p.bd : "Pendiente"]}))
+        text:[p.ref, p.d, fmtDate(p.cr), p.cli, l.pr, l.q + " " + l.um, l.qe, l.pe, l.st, p.bloqueado ? "Bloqueado: " + p.bd : "Pendiente"]})))
     };
   }
   if(view === "cyo") return pedModel(pedidos.filter(p => matchQ(q, [p.ref, p.d, p.cli, p.lines.map(l => l.pr).join(" ")])));
   if(view === "bloqueados"){
     const fb = $("fBlq"), cuentas = {};
+    const tipoMan = m => m.bq || "Bloqueo manual", bm = manEnv("bloqueado");
     pedidos.filter(p => p.bloqueado).forEach(p => cuentas[p.bd || "Sin tipo"] = (cuentas[p.bd || "Sin tipo"] || 0) + 1);
+    bm.forEach(m => cuentas[tipoMan(m)] = (cuentas[tipoMan(m)] || 0) + 1);
     const sel = fb.value, tipos = Object.keys(cuentas).sort();
-    fb.innerHTML = `<option value="">Todos los tipos de bloqueo (${pedidos.filter(p => p.bloqueado).length})</option>` + tipos.map(t => `<option value="${esc(t)}">${esc(t)} (${cuentas[t]})</option>`).join("");
+    fb.innerHTML = `<option value="">Todos los tipos de bloqueo (${pedidos.filter(p => p.bloqueado).length + bm.length})</option>` + tipos.map(t => `<option value="${esc(t)}">${esc(t)} (${cuentas[t]})</option>`).join("");
     fb.value = tipos.includes(sel) ? sel : "";
     const list = pedidos.filter(p => p.bloqueado && (!fb.value || (p.bd || "Sin tipo") === fb.value) && matchQ(q, [p.ref, p.d, p.cli, p.bd, p.lines.map(l => l.pr).join(" ")]));
+    const filasMan = bm.filter(m => (!fb.value || tipoMan(m) === fb.value) && matchQ(q, [m.fac, m.c, m.a, tipoMan(m)])).map(m => ({cls:"blocked",
+      cells:[`<span class="mono">${esc(m.fac)}</span>`, `<span class="mono">Manual</span>`, `<span class="mono">${fmtDate(m.f)}</span>`, esc(m.c + " · " + m.a),
+        `<span class="pill crit">${esc(tipoMan(m))}</span>`, `<span class="mono">${fmtN(m.q)}</span>`, `<span class="mono ${daysSince(m.f) > 15 ? "age old" : ""}">${daysSince(m.f)}</span>`,
+        `<div class="rowact"><button class="btn small" data-a="mandesbloquear" data-id="${esc(m.id)}">Desbloquear</button><button class="btn small danger" data-a="deshacerfac" data-id="${esc(m.id)}">Deshacer</button></div>`],
+      text:[m.fac, "Manual", fmtDate(m.f), m.c + " · " + m.a, tipoMan(m), m.q, daysSince(m.f)]}));
     return {head:["Factura","Pedido","Fecha","Cliente","Tipo de bloqueo","Pend. entrega","Días","Acciones"], numCols:[5,6], noExport:[7],
-      rows:list.map(p => ({cls:"blocked",
+      rows:filasMan.concat(list.map(p => ({cls:"blocked",
         cells:[`<span class="mono">${esc(p.ref)}</span>`, `<span class="mono">${esc(p.d)}</span>`, `<span class="mono">${fmtDate(p.cr)}</span>`, esc(p.cli),
           `<span class="pill crit">${esc(p.bd)}</span>`, `<span class="mono">${fmtN(p.pend)}</span>`, `<span class="mono ${daysSince(p.cr) > 15 ? "age old" : ""}">${daysSince(p.cr)}</span>`,
           `<div class="rowact"><button class="btn small" data-a="desbloquear" data-id="${esc(p.d)}">Desbloquear</button><button class="btn small" data-a="verped" data-id="${esc(p.d)}">Ver</button></div>`],
-        text:[p.ref, p.d, fmtDate(p.cr), p.cli, p.bd, p.pend, daysSince(p.cr)]}))};
+        text:[p.ref, p.d, fmtDate(p.cr), p.cli, p.bd, p.pend, daysSince(p.cr)]})))};
   }
   if(view === "facturar" && $("fFac").value === "manual"){
     const list = fman.filter(m => matchQ(q, [m.c, m.a, m.fac])).sort((a, b) => (b.ts || 0) - (a.ts || 0));
-    return {head:["Cliente","Artículo","Factura","Cantidad","Fecha","Acciones"], numCols:[3], noExport:[5],
+    const pillEnv = m => { const e = envDe(m); return `<span class="pill ${e === "bloqueado" ? "crit" : e === "pendiente" ? "warn" : "ok"}">${ENV[e]}${e === "bloqueado" && m.bq ? " · " + esc(m.bq) : ""}</span>`; };
+    const accEnv = m => { const e = envDe(m); return `<div class="rowact">${e === "pendiente" ? `<button class="btn small" data-a="manrecibir" data-id="${esc(m.id)}">Recibir</button>` : e === "bloqueado" ? `<button class="btn small" data-a="mandesbloquear" data-id="${esc(m.id)}">Desbloquear</button>` : ""}<button class="btn small danger" data-a="deshacerfac" data-id="${esc(m.id)}">Deshacer</button></div>`; };
+    return {head:["Cliente","Artículo","Factura","Cantidad","Fecha","Estado del envío","Acciones"], numCols:[3], noExport:[6],
       rows:list.map(m => ({cls:"",
-        cells:[esc(m.c), esc(m.a), `<span class="mono">${esc(m.fac)}</span>`, `<span class="mono">${fmtN(m.q)}</span>`, `<span class="mono">${fmtDate(m.f)}</span>`,
-          `<button class="btn small danger" data-a="deshacerfac" data-id="${esc(m.id)}">Deshacer</button>`],
-        text:[m.c, m.a, m.fac, m.q, fmtDate(m.f)]}))};
+        cells:[esc(m.c), esc(m.a), `<span class="mono">${esc(m.fac)}</span>`, `<span class="mono">${fmtN(m.q)}</span>`, `<span class="mono">${fmtDate(m.f)}</span>`, pillEnv(m), accEnv(m)],
+        text:[m.c, m.a, m.fac, m.q, fmtDate(m.f), ENV[envDe(m)] + (m.bq ? " · " + m.bq : "")]}))};
   }
   if(view === "facturar" && $("fFac").value === "sinretirar"){
     const list = sinRet.filter(x => matchQ(q, [x.cli, x.prod]));
@@ -688,6 +705,12 @@ function showModal(title, body){
 function action(a, id){
   if(a === "importar"){ $("fileInput").click(); return; }
   if(a === "facturarman"){ const g = grupos.find(x => x.key === decodeURIComponent(id)); if(g) openFacMan(g); return; }
+  if(a === "manrecibir" || a === "mandesbloquear"){
+    const m = fman.find(x => x.id === id); if(!m) return;
+    const nuevo = Object.assign({}, m, a === "manrecibir" ? {env:"recibido"} : {env:"pendiente"}, {envF:today()});
+    io.facSet(nuevo).then(() => toast(a === "manrecibir" ? "Marcada como recibida." : "Desbloqueada: pasa a pendiente de recibir."), e => toast("No se pudo guardar: " + e.message));
+    return;
+  }
   if(a === "deshacerfac"){
     io.facDel(id).then(() => toast("Factura a mano deshecha."), () => toast("No se pudo deshacer."));
     closeModal(); return;
@@ -747,16 +770,21 @@ function openFacMan(g){
       <label class="full">N° de factura<input id="fm_fac" autocomplete="off" placeholder="Ej. 3014-0788"></label>
       <label>Cantidad facturada<input id="fm_q" type="number" min="0" step="any" value="${g.neto}"></label>
       <label>Fecha<input id="fm_f" type="date" value="${today()}"></label>
+      <label class="full">Estado del envío<select id="fm_env"><option value="">Elegí el estado…</option><option value="entregado">Entregado</option><option value="pendiente">Pendiente de recibir</option><option value="bloqueado">Bloqueado</option></select></label>
+      <label class="full" id="fm_bqw" hidden>Tipo de bloqueo (opcional)<input id="fm_bq" list="fm_bql" autocomplete="off" placeholder="Ej. Cobranzas"><datalist id="fm_bql">${[...new Set(pedidos.filter(p => p.bd).map(p => p.bd))].map(t => `<option value="${esc(t)}">`).join("")}</datalist></label>
     </div>
     <div class="mfoot"><button class="btn" id="fmNo">Cancelar</button><button class="btn primary" id="fmOk">Guardar</button></div></div></div>`;
   $("fm_fac").focus();
+  $("fm_env").onchange = () => { $("fm_bqw").hidden = $("fm_env").value !== "bloqueado"; };
   $("fmNo").onclick = closeModal;
   $("fmOk").onclick = async () => {
     const fac = $("fm_fac").value.trim(), q = Number($("fm_q").value);
     if(!fac){ toast("Escribí el número de factura."); $("fm_fac").focus(); return; }
     if(!(q > 0)){ toast("Ingresá una cantidad mayor a 0."); $("fm_q").focus(); return; }
     if(q > g.neto + 0.0001){ toast("La cantidad supera el saldo a facturar (" + fmtN(g.neto) + ")."); return; }
-    const m = {id:uid(), key:g.key, c:g.c, a:g.a, fac, q, f:$("fm_f").value || today(), sb:g.saldo, ts:Date.now()};
+    const env = $("fm_env").value;
+    if(!env){ toast("Elegí el estado del envío."); $("fm_env").focus(); return; }
+    const m = {id:uid(), key:g.key, c:g.c, a:g.a, fac, q, f:$("fm_f").value || today(), sb:g.saldo, ts:Date.now(), env, envF:today(), bq:env === "bloqueado" ? $("fm_bq").value.trim() : ""};
     closeModal();
     try { await io.facSet(m); toast("Factura cargada."); } catch(e){ toast("No se pudo guardar: " + (e.code || e.message)); }
   };

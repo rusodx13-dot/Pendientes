@@ -15,8 +15,8 @@ var SCHEMA = {
                  head: ['Doc. de ventas','Recibido','Fecha recibido','Desbloqueado','Fecha desbloqueo','Nota']},
   Stock:        {cols: ['id','producto','tipo','cantidad','fecha','nota','ts'], num: ['cantidad','ts'],
                  head: ['Id','Producto','Tipo','Cantidad','Fecha','Nota','Marca de tiempo']},
-  FacturasMano: {cols: ['id','key','c','a','fac','q','f','sb','ts'], num: ['q','sb','ts'],
-                 head: ['Id','Clave','Cliente','Artículo','Factura','Cantidad','Fecha','Saldo al cargar','Marca de tiempo']},
+  FacturasMano: {cols: ['id','key','c','a','fac','q','f','sb','ts','env','envF','bq'], num: ['q','sb','ts'],
+                 head: ['Id','Clave','Cliente','Artículo','Factura','Cantidad','Fecha','Saldo al cargar','Marca de tiempo','Estado del envío','Fecha del estado','Tipo de bloqueo']},
   Usuarios:     {cols: ['usuario','sal','hash','rol','activo'], num: [], bool: ['activo'],
                  head: ['Usuario','Sal','Clave (hash)','Rol','Activo']},
   Sesiones:     {cols: ['th','usuario','exp'], num: ['exp'], head: ['Token (hash)','Usuario','Vence']}
@@ -73,12 +73,22 @@ function despachar_(b) {
 /* ---------- hojas ---------- */
 function ss_() { return SpreadsheetApp.getActiveSpreadsheet(); }
 
+var SCHEMA_V = '2';
 function asegurarHojas_() {
-  var ss = ss_();
+  var ss = ss_(), props = PropertiesService.getScriptProperties(), migrar = props.getProperty('sv') !== SCHEMA_V;
   Object.keys(SCHEMA).forEach(function (nombre) {
-    var sh = ss.getSheetByName(nombre);
-    if (sh) return;
-    var def = SCHEMA[nombre];
+    var sh = ss.getSheetByName(nombre), def = SCHEMA[nombre];
+    if (sh) {
+      if (!migrar) return;
+      // planillas creadas con una versión anterior: completa los encabezados de las columnas nuevas
+      if (sh.getRange(1, 1, 1, def.head.length).getValues()[0].join('|') !== def.head.join('|')) {
+        sh.getRange(1, 1, 1, def.head.length).setValues([def.head]).setFontWeight('bold').setBackground('#123524').setFontColor('#ffffff');
+        def.cols.forEach(function (k, i) {
+          if ((def.num || []).indexOf(k) < 0 && (def.bool || []).indexOf(k) < 0) sh.getRange(1, i + 1, sh.getMaxRows(), 1).setNumberFormat('@');
+        });
+      }
+      return;
+    }
     sh = ss.insertSheet(nombre);
     // columnas de texto en formato "texto plano" para que Sheets no convierta fechas ni números de comprobante
     var textCols = [];
@@ -90,6 +100,7 @@ function asegurarHojas_() {
     sh.setFrozenRows(1);
     if (nombre === 'Usuarios' || nombre === 'Sesiones') sh.hideSheet();
   });
+  if (migrar) props.setProperty('sv', SCHEMA_V);
   var vacia = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1') || ss.getSheetByName('Hoja1');
   if (vacia && ss.getSheets().length > 1 && vacia.getLastRow() === 0) ss.deleteSheet(vacia);
 }

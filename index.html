@@ -151,6 +151,7 @@ tr.blocked td:first-child{box-shadow:inset 4px 0 0 var(--crit)}
     <select id="fFac" aria-label="Qué mostrar" hidden style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)">
       <option value="">Saldo a facturar</option><option value="sinretirar">Comprado y sin retirar</option><option value="manual">Facturado a mano</option>
     </select>
+    <select id="fBlq" aria-label="Tipo de bloqueo" hidden style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"></select>
     <select id="fEnt" aria-label="Estado de entrega" hidden style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)">
       <option value="">Todos los estados</option><option value="parcial">Entrega parcial</option><option value="nosum">No suministrado</option>
     </select>
@@ -563,7 +564,12 @@ function viewModel(q){
   }
   if(view === "cyo") return pedModel(pedidos.filter(p => matchQ(q, [p.ref, p.d, p.cli, p.lines.map(l => l.pr).join(" ")])));
   if(view === "bloqueados"){
-    const list = pedidos.filter(p => p.bloqueado && matchQ(q, [p.ref, p.d, p.cli, p.bd, p.lines.map(l => l.pr).join(" ")]));
+    const fb = $("fBlq"), cuentas = {};
+    pedidos.filter(p => p.bloqueado).forEach(p => cuentas[p.bd || "Sin tipo"] = (cuentas[p.bd || "Sin tipo"] || 0) + 1);
+    const sel = fb.value, tipos = Object.keys(cuentas).sort();
+    fb.innerHTML = `<option value="">Todos los tipos de bloqueo (${pedidos.filter(p => p.bloqueado).length})</option>` + tipos.map(t => `<option value="${esc(t)}">${esc(t)} (${cuentas[t]})</option>`).join("");
+    fb.value = tipos.includes(sel) ? sel : "";
+    const list = pedidos.filter(p => p.bloqueado && (!fb.value || (p.bd || "Sin tipo") === fb.value) && matchQ(q, [p.ref, p.d, p.cli, p.bd, p.lines.map(l => l.pr).join(" ")]));
     return {head:["Factura","Pedido","Fecha","Cliente","Tipo de bloqueo","Pend. entrega","Días","Acciones"], numCols:[5,6], noExport:[7],
       rows:list.map(p => ({cls:"blocked",
         cells:[`<span class="mono">${esc(p.ref)}</span>`, `<span class="mono">${esc(p.d)}</span>`, `<span class="mono">${fmtDate(p.cr)}</span>`, esc(p.cli),
@@ -634,7 +640,7 @@ function render(){
   renderTabs();
   const isNormal = view === "normal";
   $("btnImportar").hidden = isNormal; $("btnMov").hidden = !isNormal;
-  $("fEnt").hidden = view !== "recibir"; $("fFac").hidden = view !== "facturar";
+  $("fEnt").hidden = view !== "recibir"; $("fBlq").hidden = view !== "bloqueados"; $("fFac").hidden = view !== "facturar";
   $("detalleBox").hidden = !isNormal;
   $("rowsDet").innerHTML = "";
   $("status").textContent = mov.length || peds.length ? `Base: ${mov.length} movimientos · ${pedidos.length} pedidos con factura` : "Base vacía";
@@ -833,7 +839,7 @@ $("btnImportar").onclick = () => $("fileInput").click();
 $("fileInput").onchange = async e => { const fs = [...e.target.files]; e.target.value = ""; if(fs.length) await leerArchivos(fs); };
 $("btnMov").onclick = () => openStk("", "ingreso");
 $("q").oninput = render;
-$("fEnt").onchange = render; $("fFac").onchange = render;
+$("fEnt").onchange = render; $("fBlq").onchange = render; $("fFac").onchange = render;
 
 /* ---------------- Exportar ---------------- */
 async function exportar(){

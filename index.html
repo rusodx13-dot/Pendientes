@@ -60,10 +60,10 @@ button,select,input,textarea{font:inherit;color:inherit}
 .tab[data-k="normal"]{border-left-color:var(--ok)}
 .filters{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
 .filters select,.filters input{padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);flex:1 1 220px}
-.tablebox{background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow-x:auto}
-table{border-collapse:collapse;width:100%;min-width:900px}
-th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;font-size:14px}
-th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600;white-space:nowrap}
+.tablebox{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+table{border-collapse:collapse;width:100%}
+th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;font-size:13px}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
 tr:last-child td{border-bottom:0}
 .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .num{text-align:right}
@@ -75,6 +75,29 @@ tr:last-child td{border-bottom:0}
 .pill.mute{background:var(--bg);color:var(--muted)}
 tr.blocked td:first-child{box-shadow:inset 4px 0 0 var(--crit)}
 .rowact{display:flex;flex-wrap:wrap;gap:4px}
+.rowact .btn{padding:4px 8px;font-size:12px}
+.tablebox .mono{font-size:12.5px}
+/* Sin desplazamiento lateral: en pantallas angostas cada fila pasa a ser una tarjeta con sus etiquetas. */
+.wrap{overflow-x:hidden}
+@media (max-width:1180px){
+  .tablebox{background:none;border:0}
+  .tablebox thead{display:none}
+  .tablebox table,.tablebox tbody,.tablebox tr,.tablebox td{display:block;width:100%}
+  .tablebox tr{background:var(--surface);border:1px solid var(--line);border-radius:8px;margin-bottom:10px;padding:6px 12px}
+  .tablebox td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:0;padding:5px 0;text-align:right;overflow-wrap:anywhere}
+  .tablebox td::before{content:attr(data-label);flex:0 0 36%;max-width:36%;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+  .tablebox td:not([data-label]){justify-content:center;text-align:center}
+  .tablebox td:not([data-label])::before{display:none}
+  .tablebox td .rowact{justify-content:flex-end}
+}
+@media (max-width:700px){
+  .tblscroll thead{display:none}
+  .tblscroll table,.tblscroll tbody,.tblscroll tr,.tblscroll td{display:block;width:100%}
+  .tblscroll tr{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;padding:4px 10px}
+  .tblscroll td{display:flex;justify-content:space-between;gap:10px;border:0;padding:4px 0;text-align:right;overflow-wrap:anywhere}
+  .tblscroll td::before{content:attr(data-label);flex:0 0 38%;max-width:38%;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;font-weight:600}
+  .modal{padding:14px}.modal.wide{max-width:100%}
+}
 .empty{padding:32px 16px;text-align:center;color:var(--muted)}
 .note{font-size:12px;color:var(--muted)}
 .age{font-size:12px;color:var(--muted)}
@@ -140,7 +163,7 @@ tr.blocked td:first-child{box-shadow:inset 4px 0 0 var(--crit)}
 
   <div id="detalleBox" hidden>
     <h2 class="sec">Movimientos de stock</h2>
-    <div class="tablebox"><table style="min-width:640px">
+    <div class="tablebox"><table>
       <thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="num">Cantidad</th><th>Nota</th><th>Acciones</th></tr></thead>
       <tbody id="rowsDet"></tbody>
     </table></div>
@@ -577,6 +600,13 @@ function viewModel(q){
   }
   return null;
 }
+function etiquetar(root){
+  (root || document).querySelectorAll("table").forEach(t => {
+    const hs = [...t.querySelectorAll("thead th")].map(h => h.textContent.trim());
+    if(!hs.length) return;
+    t.querySelectorAll("tbody tr").forEach(tr => { if(tr.children.length === hs.length) [...tr.children].forEach((td, i) => td.setAttribute("data-label", hs[i])); });
+  });
+}
 function tableHTML(m){
   const num = new Set(m.numCols || []);
   $("thead").innerHTML = "<tr>" + m.head.map((h, i) => `<th class="${num.has(i) ? "num" : ""}">${h}</th>`).join("") + "</tr>";
@@ -609,7 +639,7 @@ function render(){
   $("rowsDet").innerHTML = "";
   $("status").textContent = mov.length || peds.length ? `Base: ${mov.length} movimientos · ${pedidos.length} pedidos con factura` : "Base vacía";
   const q = $("q").value.trim().toLowerCase();
-  if(isNormal){ stockView(q); return; }
+  if(isNormal){ stockView(q); etiquetar(); return; }
   if(!mov.length && !peds.length){
     $("thead").innerHTML = "";
     $("rows").innerHTML = `<tr><td><div class="empty">Todavía no hay datos en la base.<br>Importá el reporte de movimientos y el de facturas para empezar.<br><br><button class="btn primary" data-a="importar">Importar reportes</button></div></td></tr>`;
@@ -617,6 +647,7 @@ function render(){
   }
   const m = viewModel(q);
   tableHTML(m);
+  etiquetar();
   const notes = {
     recibir:"Cada renglón es una línea de un pedido con factura que todavía no figura como recibido. Recibir se aplica al pedido completo y pasa solo cuando su factura aparece en un reporte de movimientos, o cuando lo marcás a mano. Si el despacho está bloqueado no se puede recibir.",
     facturar:"Saldo a facturar = remitos (negativos) menos facturas y ajustes (positivos) de los movimientos, por cliente y artículo, menos lo que ya está facturado en pedidos de la pestaña Pendientes de recibir (mismo cliente y misma marca de producto). Incluye al proveedor 12396.",
@@ -641,11 +672,12 @@ async function setEstado(d, patch){
 function closeModal(){ $("modalHost").innerHTML = ""; }
 function table(head, rows, numCols){
   const nc = new Set(numCols || []);
-  return `<div class="tblscroll"><table style="min-width:600px"><thead><tr>${head.map((h, i) => `<th class="${nc.has(i) ? "num" : ""}">${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => "<tr>" + r.map((c, i) => `<td class="${nc.has(i) ? "num" : ""}">${c}</td>`).join("") + "</tr>").join("")}</tbody></table></div>`;
+  return `<div class="tblscroll"><table><thead><tr>${head.map((h, i) => `<th class="${nc.has(i) ? "num" : ""}">${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => "<tr>" + r.map((c, i) => `<td class="${nc.has(i) ? "num" : ""}">${c}</td>`).join("") + "</tr>").join("")}</tbody></table></div>`;
 }
 function showModal(title, body){
   $("modalHost").innerHTML = `<div class="overlay"><div class="modal wide" role="dialog" aria-modal="true"><h2>${title}</h2>${body}<div class="mfoot"><button class="btn primary" id="mClose">Cerrar</button></div></div></div>`;
   $("mClose").onclick = closeModal;
+  etiquetar($("modalHost"));
 }
 function action(a, id){
   if(a === "importar"){ $("fileInput").click(); return; }

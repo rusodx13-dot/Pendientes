@@ -213,8 +213,8 @@ function parseMov(objs){
   const h = headerMap(objs[0]), g = (o, n) => o[h[n]] ?? "";
   const rows = [], skip = {subtotal:0, inactivo:0};
   for(const o of objs){
-    const cuenta = String(g(o,"cuenta")).trim(), comp = String(g(o,"comprobante")).trim();
-    if(!cuenta && !comp){ skip.subtotal++; continue; }
+    const cuenta = String(g(o,"cuenta")).trim(), comp = String(g(o,"comprobante")).trim(), art = String(g(o,"articulo")).trim();
+    if(!comp && !art){ skip.subtotal++; continue; }   /* subtotales del reporte: sin comprobante ni artículo */
     const prov = String(g(o,"proveedorcyo")).trim().replace(/\.0$/, "");
     rows.push({c:cuenta, a:String(g(o,"articulo")).trim(), k:comp, pf:num(g(o,"pendientedefacturar")), pe:num(g(o,"pendientedeentregar")),
       f:toISO(g(o,"fecha")), p:String(g(o,"pedido")).trim(), o:String(g(o,"observaciones")).trim(), y:prov,
@@ -424,10 +424,16 @@ function aplicarSesion(){
   $("btnUsuarios").hidden = !esAdmin();
   $("btnImportar").hidden = ro;
 }
+const esSubtotal = r => !String(r.a || "").trim() && !String(r.k || "").trim();
 async function cargar(silencioso){
   try {
     const j = await api({a:"cargar"});
     S.v = j.v; S.me = j.me; mov = j.mov; peds = j.ped; estado = j.estado; stk = j.stk; fman = j.fman;
+    const basura = mov.filter(esSubtotal).length;
+    if(basura){
+      if(esAdmin()){ try { const r = await api({a:"limpiar"}); S.v = r.v; mov = mov.filter(r2 => !esSubtotal(r2)); toast("Se quitaron " + r.borradas + " subtotales de la base."); } catch(e){ mov = mov.filter(r2 => !esSubtotal(r2)); } }
+      else mov = mov.filter(r2 => !esSubtotal(r2));
+    }
     $("authHost").innerHTML = ""; aplicarSesion(); render();
     const h = new Date(); $("status").textContent = "Guardado en tu planilla de Google · actualizado " + String(h.getHours()).padStart(2,"0") + ":" + String(h.getMinutes()).padStart(2,"0");
   } catch(e){ if(!silencioso) $("status").textContent = "No se pudo cargar: " + (e.error || e.message || "error"); }

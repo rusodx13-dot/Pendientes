@@ -62,6 +62,7 @@ function despachar_(b) {
     case 'stkDel':   exigirEscritura_(me); return borrar_('Stock', b.id);
     case 'facSet':   exigirEscritura_(me); return upsert_('FacturasMano', b.m.id, b.m);
     case 'facDel':   exigirEscritura_(me); return borrar_('FacturasMano', b.id);
+    case 'limpiar':  exigirEscritura_(me); return limpiar_();
     case 'usuarios': exigirAdmin_(me); return listarUsuarios_();
     case 'usuarioGuardar': exigirAdmin_(me); return guardarUsuario_(b);
     case 'claveCambiar': return cambiarClave_(me, b);
@@ -164,6 +165,20 @@ function append_(b) {
   if (necesarias > sh.getMaxRows()) sh.insertRowsAfter(sh.getMaxRows(), necesarias - sh.getMaxRows());
   sh.getRange(primera, 1, data.length, def.cols.length).setValues(data);
   return {ok: true, v: subirVersion_()};
+}
+
+/* Quita de Movimientos los renglones de subtotal: sin artículo ni comprobante. */
+function limpiar_() {
+  var def = SCHEMA.Movimientos, sh = ss_().getSheetByName('Movimientos'), n = sh.getLastRow() - 1;
+  if (n < 1) return {ok: true, borradas: 0, v: version_()};
+  var ia = def.cols.indexOf('a'), ik = def.cols.indexOf('k');
+  var vals = sh.getRange(2, 1, n, def.cols.length).getValues();
+  var keep = vals.filter(function (r) { return String(r[ia]).trim() !== '' || String(r[ik]).trim() !== ''; });
+  var borradas = vals.length - keep.length;
+  if (!borradas) return {ok: true, borradas: 0, v: version_()};
+  sh.getRange(2, 1, n, def.cols.length).clearContent();
+  if (keep.length) sh.getRange(2, 1, keep.length, def.cols.length).setValues(keep);
+  return {ok: true, borradas: borradas, v: subirVersion_()};
 }
 
 function buscarFila_(sh, clave) {

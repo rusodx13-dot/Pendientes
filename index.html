@@ -304,8 +304,9 @@ function buildGrupos(mov){
     g.saldo = Math.round((g.rem - g.fac) * 10000) / 10000;
     g.pendEnt = Math.max(0, -g.pe);
     g.provs = [...g.pv].sort().join(", ");
-    g.old = "";
+    g.old = ""; g.ult = "";
     if(g.saldo > 0){
+      g.ult = g.rows.filter(r => r.pf < 0 && r.f).reduce((m, r) => r.f > m ? r.f : m, "");   /* último remito sin facturar */
       let credit = g.fac;
       const rems = g.rows.filter(r => r.pf < 0).sort((a, b) => (a.f || "").localeCompare(b.f || ""));
       for(const r of rems){ const amt = -r.pf; if(credit >= amt){ credit -= amt; } else { g.old = r.f; break; } }
@@ -677,24 +678,24 @@ function viewModel(q){
         text:[x.cli, x.prod, x.q, x.rem, x.exceso, x.qBloq, x.peds.size]}))};
   }
   if(view === "pedidos"){
-    const list = pedFact().filter(g => matchQ(q, [g.c, g.a, fpTexto(dat[g.key])])).sort((a, b) => (a.old || "9999").localeCompare(b.old || "9999"));
-    return {head:["Cliente","Artículo","Proveedor","Cantidad a facturar","Valor a facturar","Forma de pago","Remito más antiguo sin facturar","Días","Acciones"], numCols:[3,7], noExport:[8],
+    const list = pedFact().filter(g => matchQ(q, [g.c, g.a, fpTexto(dat[g.key])])).sort((a, b) => (a.ult || "9999").localeCompare(b.ult || "9999"));
+    return {head:["Cliente","Artículo","Proveedor","Cantidad a facturar","Valor a facturar","Forma de pago","Último remito sin facturar","Días","Acciones"], numCols:[3,7], noExport:[8],
       rows:list.map(g => ({cls:"",
-        cells:[esc(g.c), esc(g.a), `<span class="mono">${esc(g.provs)}</span>`, `<span class="pill info mono">${fmtN(g.neto)}</span>`, valorCell(g), fpCell(g), `<span class="mono">${fmtDate(g.old)}</span>`,
-          `<span class="mono ${daysSince(g.old) > 30 ? "age old" : ""}">${g.old ? daysSince(g.old) : ""}</span>`,
+        cells:[esc(g.c), esc(g.a), `<span class="mono">${esc(g.provs)}</span>`, `<span class="pill info mono">${fmtN(g.neto)}</span>`, valorCell(g), fpCell(g), `<span class="mono">${fmtDate(g.ult)}</span>`,
+          `<span class="mono ${daysSince(g.ult) > 30 ? "age old" : ""}">${g.ult ? daysSince(g.ult) : ""}</span>`,
           `<div class="rowact"><button class="btn small" data-a="facturarman" data-id="${encodeURIComponent(g.key)}">Facturado</button><button class="btn small" data-a="vergrupo" data-id="${encodeURIComponent(g.key)}">Ver movimientos</button><button class="btn small" data-a="volverped" data-id="${encodeURIComponent(g.key)}">Volver a pendientes</button></div>`],
-        text:[g.c, g.a, g.provs, g.neto, (dat[g.key] || {}).valor || "", fpTexto(dat[g.key]), fmtDate(g.old), g.old ? daysSince(g.old) : ""]}))};
+        text:[g.c, g.a, g.provs, g.neto, (dat[g.key] || {}).valor || "", fpTexto(dat[g.key]), fmtDate(g.ult), g.ult ? daysSince(g.ult) : ""]}))};
   }
   if(view === "facturar"){
-    const list = pendFact().filter(g => matchQ(q, [g.c, g.a])).sort((a, b) => (a.old || "9999").localeCompare(b.old || "9999"));
-    return {head:["Cliente","Artículo","Proveedor","Remitido","Facturado","Ya facturado en pedidos sin recibir","Facturado a mano","Saldo a facturar","Remito más antiguo sin facturar","Días","Valor a facturar","Forma de pago","Acciones"], numCols:[3,4,5,6,7,9], noExport:[12],
+    const list = pendFact().filter(g => matchQ(q, [g.c, g.a])).sort((a, b) => (a.ult || "9999").localeCompare(b.ult || "9999"));
+    return {head:["Cliente","Artículo","Proveedor","Remitido","Facturado","Ya facturado en pedidos sin recibir","Facturado a mano","Saldo a facturar","Último remito sin facturar","Días","Valor a facturar","Forma de pago","Acciones"], numCols:[3,4,5,6,7,9], noExport:[12],
       rows:list.map(g => ({cls:"",
         cells:[esc(g.c), esc(g.a), `<span class="mono">${esc(g.provs)}</span>`, `<span class="mono">${fmtN(g.rem)}</span>`, `<span class="mono">${fmtN(g.fac)}</span>`,
-          `<span class="mono">${g.cub ? fmtN(g.cub) : "—"}</span>`, `<span class="mono">${g.man ? fmtN(g.man) : "—"}</span>`, `<span class="pill info mono">${fmtN(g.neto)}</span>`, `<span class="mono">${fmtDate(g.old)}</span>`,
-          `<span class="mono ${daysSince(g.old) > 30 ? "age old" : ""}">${g.old ? daysSince(g.old) : ""}</span>`,
+          `<span class="mono">${g.cub ? fmtN(g.cub) : "—"}</span>`, `<span class="mono">${g.man ? fmtN(g.man) : "—"}</span>`, `<span class="pill info mono">${fmtN(g.neto)}</span>`, `<span class="mono">${fmtDate(g.ult)}</span>`,
+          `<span class="mono ${daysSince(g.ult) > 30 ? "age old" : ""}">${g.ult ? daysSince(g.ult) : ""}</span>`,
           valorCell(g), fpCell(g),
           `<div class="rowact"><button class="btn small" data-a="facturarman" data-id="${encodeURIComponent(g.key)}">Facturado</button><button class="btn small" data-a="vergrupo" data-id="${encodeURIComponent(g.key)}">Ver movimientos</button></div>`],
-        text:[g.c, g.a, g.provs, g.rem, g.fac, g.cub, g.man, g.neto, fmtDate(g.old), g.old ? daysSince(g.old) : "", (dat[g.key] || {}).valor || "", fpTexto(dat[g.key])]}))};
+        text:[g.c, g.a, g.provs, g.rem, g.fac, g.cub, g.man, g.neto, fmtDate(g.ult), g.ult ? daysSince(g.ult) : "", (dat[g.key] || {}).valor || "", fpTexto(dat[g.key])]}))};
   }
   return null;
 }

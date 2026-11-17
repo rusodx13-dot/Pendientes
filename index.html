@@ -55,6 +55,7 @@ button,select,input,textarea{font:inherit;color:inherit}
 .tab[aria-selected="true"]{border-color:var(--accent);background:var(--accent-soft)}
 .tab[data-k="recibir"]{border-left-color:var(--warn)}
 .tab[data-k="facturar"]{border-left-color:var(--info)}
+.tab[data-k="pedidos"]{border-left-color:#1f8a8a}
 .tab[data-k="bloqueados"]{border-left-color:var(--crit)}
 .tab[data-k="cyo"]{border-left-color:#7a4fa3}
 .tab[data-k="normal"]{border-left-color:var(--ok)}
@@ -392,6 +393,7 @@ let pedidos = [], grupos = [], sinRet = [];
 const VIEWS = [
   {k:"recibir", l:"Pendientes de recibir"},
   {k:"facturar", l:"Pendientes de facturar"},
+  {k:"pedidos", l:"Pedidos"},
   {k:"bloqueados", l:"Despachos bloqueados"},
   {k:"cyo", l:"Cuenta y orden (todos)"},
   {k:"normal", l:"Mercadería normal"},
@@ -551,7 +553,13 @@ function fpCell(g){
   }
   return `<div class="fpbox">${h}</div>`;
 }
-const pendFact = () => grupos.filter(g => g.neto > 0.0001 && okV(g.vend));
+/* Una línea pasa a «Pedidos» cuando tiene valor a facturar y la forma de pago completa. */
+const datCompleto = d => { if(!d || !(d.valor > 0) || !d.fp) return false;
+  if(d.fp === "dq") return !!d.vto;
+  if(d.fp === "canje") return !!d.cj && !!d.cereal && (d.cj !== "futuro" || !!d.vto);
+  return true; };
+const pendFact = () => grupos.filter(g => g.neto > 0.0001 && okV(g.vend) && !datCompleto(dat[g.key]));
+const pedFact = () => grupos.filter(g => g.neto > 0.0001 && okV(g.vend) && datCompleto(dat[g.key]));
 /* Pendiente de recibir = renglones de pedidos con factura que todavía no figuran como recibidos. Los renglones "entregado p/completo" ya se despacharon y los "no relev.p.entrega" no se tienen en cuenta. */
 const entregada = l => /entregado/i.test(l.st || "");
 const pendRecLines = () => { const out = []; pedidos.filter(p => p.facturado && !p.recibido && okV(p.vend)).forEach(p => p.lines.filter(l => !entregada(l) && !noRelev(l)).forEach((l, i) => out.push({p, l, first:i === 0}))); return out; };
@@ -569,7 +577,7 @@ function prodsStock(){
   return Object.values(g).sort((a, b) => a.producto.localeCompare(b.producto));
 }
 function counts(){
-  return {recibir: pendRecLines().length + manEnv("pendiente").length, facturar: pendFact().length,
+  return {recibir: pendRecLines().length + manEnv("pendiente").length, facturar: pendFact().length, pedidos: pedFact().length,
     bloqueados: pedidos.filter(p => p.bloqueado && okV(p.vend)).length + manEnv("bloqueado").length, cyo: pedidos.filter(p => okV(p.vend)).length, normal: prodsStock().length};
 }
 function renderTabs(){
@@ -668,6 +676,15 @@ function viewModel(q){
           `<button class="btn small" data-a="versinretirar" data-id="${encodeURIComponent(x.key)}">Ver pedidos</button>`],
         text:[x.cli, x.prod, x.q, x.rem, x.exceso, x.qBloq, x.peds.size]}))};
   }
+  if(view === "pedidos"){
+    const list = pedFact().filter(g => matchQ(q, [g.c, g.a, fpTexto(dat[g.key])])).sort((a, b) => (a.old || "9999").localeCompare(b.old || "9999"));
+    return {head:["Cliente","Artículo","Proveedor","Cantidad a facturar","Valor a facturar","Forma de pago","Remito más antiguo sin facturar","Días","Acciones"], numCols:[3,7], noExport:[8],
+      rows:list.map(g => ({cls:"",
+        cells:[esc(g.c), esc(g.a), `<span class="mono">${esc(g.provs)}</span>`, `<span class="pill info mono">${fmtN(g.neto)}</span>`, valorCell(g), fpCell(g), `<span class="mono">${fmtDate(g.old)}</span>`,
+          `<span class="mono ${daysSince(g.old) > 30 ? "age old" : ""}">${g.old ? daysSince(g.old) : ""}</span>`,
+          `<div class="rowact"><button class="btn small" data-a="facturarman" data-id="${encodeURIComponent(g.key)}">Facturado</button><button class="btn small" data-a="vergrupo" data-id="${encodeURIComponent(g.key)}">Ver movimientos</button><button class="btn small" data-a="volverped" data-id="${encodeURIComponent(g.key)}">Volver a pendientes</button></div>`],
+        text:[g.c, g.a, g.provs, g.neto, (dat[g.key] || {}).valor || "", fpTexto(dat[g.key]), fmtDate(g.old), g.old ? daysSince(g.old) : ""]}))};
+  }
   if(view === "facturar"){
     const list = pendFact().filter(g => matchQ(q, [g.c, g.a])).sort((a, b) => (a.old || "9999").localeCompare(b.old || "9999"));
     return {head:["Cliente","Artículo","Proveedor","Remitido","Facturado","Ya facturado en pedidos sin recibir","Facturado a mano","Saldo a facturar","Remito más antiguo sin facturar","Días","Valor a facturar","Forma de pago","Acciones"], numCols:[3,4,5,6,7,9], noExport:[12],
@@ -718,7 +735,7 @@ function render(){
   renderTabs();
   const isNormal = view === "normal";
   fv.hidden = isNormal;
-  document.body.classList.toggle("vf", view === "facturar" && !$("fFac").value);
+  document.body.classList.toggle("vf", (view === "facturar" && !$("fFac").value) || view === "pedidos");
   $("btnImportar").hidden = isNormal || !esAdmin(); $("btnMov").hidden = !isNormal || !esAdmin();
   $("fEnt").hidden = view !== "recibir"; $("fBlq").hidden = view !== "bloqueados"; $("fFac").hidden = view !== "facturar";
   $("detalleBox").hidden = !isNormal;
@@ -739,7 +756,7 @@ function render(){
     facturar:"Saldo a facturar = remitos (negativos) menos facturas y ajustes (positivos) de los movimientos, por cliente y artículo, menos lo que ya está facturado en pedidos de la pestaña Pendientes de recibir (mismo cliente y misma marca de producto). Incluye al proveedor 12396.",
     bloqueados:"Los reportes semanales no cambian el estado de un pedido ya cargado: el desbloqueo se hace a mano.",
     cyo:"Todos los pedidos con factura cargados en la base."};
-  $("foot").textContent = m.rows.length + " registros. " + (view === "facturar" && $("fFac").value === "manual" ? "Facturas que cargaste a mano. Descuentan del saldo a facturar; si después la factura aparece en los movimientos, no se descuenta dos veces." : view === "facturar" && $("fFac").value === "sinretirar" ? "Sin retirar = lo facturado en pedidos que figuran como pendientes de recibir, menos lo ya remitido en movimientos (pendiente de facturar), por cliente y marca de producto." : (notes[view] || ""));
+  $("foot").textContent = m.rows.length + " registros. " + (view === "pedidos" ? "Valor total: " + fmtN(pedFact().filter(g => matchQ(q, [g.c, g.a, fpTexto(dat[g.key])])).reduce((t, g) => t + (dat[g.key].valor || 0), 0)) + ". Líneas con valor y forma de pago completos; las que ya facturaste a mano salen de acá. " : "") + (view === "facturar" && $("fFac").value === "manual" ? "Facturas que cargaste a mano. Descuentan del saldo a facturar; si después la factura aparece en los movimientos, no se descuenta dos veces." : view === "facturar" && $("fFac").value === "sinretirar" ? "Sin retirar = lo facturado en pedidos que figuran como pendientes de recibir, menos lo ya remitido en movimientos (pendiente de facturar), por cliente y marca de producto." : (notes[view] || ""));
 }
 
 /* ---------------- Acciones ---------------- */
@@ -768,6 +785,11 @@ function showModal(title, body){
 function action(a, id){
   if(a === "importar"){ $("fileInput").click(); return; }
   if(a === "facturarman"){ const g = grupos.find(x => x.key === decodeURIComponent(id)); if(g) openFacMan(g); return; }
+  if(a === "volverped"){
+    const key = decodeURIComponent(id), d = Object.assign({key, valor:0, fp:"", vto:"", cj:"", cereal:""}, dat[key] || {}, {fp:"", vto:"", cj:"", cereal:"", ts:Date.now()});
+    io.datSet(d).then(() => { render(); toast("Volvió a Pendientes de facturar."); }, e => toast("No se pudo guardar: " + e.message));
+    return;
+  }
   if(a === "manrecibir" || a === "mandesbloquear"){
     const m = fman.find(x => x.id === id); if(!m) return;
     const nuevo = Object.assign({}, m, a === "manrecibir" ? {env:"recibido"} : {env:"pendiente"}, {envF:today()});
@@ -821,7 +843,12 @@ document.addEventListener("change", async e => {
   else if(f === "cj"){ m.cj = el.value; if(el.value !== "futuro") m.vto = ""; }
   else m[f] = el.value.trim();
   m.ts = Date.now();
-  try { await io.datSet(m); if(f === "fp" || f === "cj") render(); }
+  try {
+    await io.datSet(m);
+    const cambia = datCompleto(antes) !== datCompleto(m);
+    if(cambia || f === "fp" || f === "cj") render();
+    if(cambia) toast(datCompleto(m) ? "Pasó a Pedidos." : "Volvió a Pendientes de facturar.");
+  }
   catch(err){ toast("No se pudo guardar: " + err.message); render(); }
 });
 document.addEventListener("click", e => {

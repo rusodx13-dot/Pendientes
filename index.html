@@ -76,9 +76,15 @@ tr:last-child td{border-bottom:0}
 tr.blocked td:first-child{box-shadow:inset 4px 0 0 var(--crit)}
 .rowact{display:flex;flex-wrap:wrap;gap:4px}
 .rowact .btn{padding:4px 8px;font-size:12px}
+.cellin{font:inherit;font-size:12.5px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink);max-width:100%;min-width:0}
+.cellin.num{width:96px;text-align:right}
+.fpbox{display:flex;flex-direction:column;gap:4px;min-width:118px}
+.fpbox .mini{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted)}
+.fpbox .mini .cellin{flex:1}
 .tablebox .mono{font-size:12.5px}
 /* Sin desplazamiento lateral: en pantallas angostas cada fila pasa a ser una tarjeta con sus etiquetas. */
 .wrap{overflow-x:hidden}
+body.vf .wrap{max-width:1500px}
 @media (max-width:1180px){
   .tablebox{background:none;border:0}
   .tablebox thead{display:none}
@@ -89,6 +95,19 @@ tr.blocked td:first-child{box-shadow:inset 4px 0 0 var(--crit)}
   .tablebox td:not([data-label]){justify-content:center;text-align:center}
   .tablebox td:not([data-label])::before{display:none}
   .tablebox td .rowact{justify-content:flex-end}
+  .tablebox td .fpbox{align-items:stretch;min-width:60%}
+}
+@media (min-width:1181px) and (max-width:1500px){
+  body.vf .tablebox{background:none;border:0}
+  body.vf .tablebox thead{display:none}
+  body.vf .tablebox table,.tablebox tbody,.tablebox tr,.tablebox td{display:block;width:100%}
+  body.vf .tablebox tr{background:var(--surface);border:1px solid var(--line);border-radius:8px;margin-bottom:10px;padding:6px 12px}
+  body.vf .tablebox td{display:flex;justify-content:space-between;align-items:center;gap:12px;border:0;padding:5px 0;text-align:right;overflow-wrap:anywhere}
+  body.vf .tablebox td::before{content:attr(data-label);flex:0 0 36%;max-width:36%;text-align:left;color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em;font-weight:600}
+  body.vf .tablebox td:not([data-label]){justify-content:center;text-align:center}
+  body.vf .tablebox td:not([data-label])::before{display:none}
+  body.vf .tablebox td .rowact{justify-content:flex-end}
+  body.vf .tablebox td .fpbox{align-items:stretch;min-width:60%}
 }
 @media (max-width:700px){
   .tblscroll thead{display:none}
@@ -367,7 +386,7 @@ function sinRetirar(grupos, pedidos){
 
 /* ---------------- Estado de la app ---------------- */
 const CH = 300;                 // filas por documento de la base
-let mov = [], peds = [], estado = {}, stk = [], fman = [];
+let mov = [], peds = [], estado = {}, stk = [], fman = [], dat = {};
 let view = "recibir", io = null;
 let pedidos = [], grupos = [], sinRet = [];
 const VIEWS = [
@@ -416,6 +435,7 @@ io = {
   setEstado: async (d, o) => { await escribir({a:"estadoSet", d, o}); estado[d] = o; render(); },
   stkSet: async m => { await escribir({a:"stkSet", m}); stk.push(m); render(); },
   stkDel: async id => { await escribir({a:"stkDel", id}); stk = stk.filter(x => x.id !== id); render(); },
+  datSet: async m => { await escribir({a:"datSet", m}); dat[m.key] = m; },
   facSet: async m => { await escribir({a:"facSet", m}); fman = fman.filter(x => x.id !== m.id).concat([m]); render(); },
   facDel: async id => { await escribir({a:"facDel", id}); fman = fman.filter(x => x.id !== id); render(); },
 };
@@ -429,7 +449,7 @@ const esSubtotal = r => !String(r.a || "").trim() && !String(r.k || "").trim();
 async function cargar(silencioso){
   try {
     const j = await api({a:"cargar"});
-    S.v = j.v; S.me = j.me; mov = j.mov; peds = j.ped; estado = j.estado; stk = j.stk; fman = j.fman;
+    S.v = j.v; S.me = j.me; mov = j.mov; peds = j.ped; estado = j.estado; stk = j.stk; fman = j.fman; dat = {}; (j.dat || []).forEach(x => { dat[x.key] = x; });
     const basura = mov.filter(esSubtotal).length;
     if(basura){
       if(esAdmin()){ try { const r = await api({a:"limpiar"}); S.v = r.v; mov = mov.filter(r2 => !esSubtotal(r2)); toast("Se quitaron " + r.borradas + " subtotales de la base."); } catch(e){ mov = mov.filter(r2 => !esSubtotal(r2)); } }
@@ -474,7 +494,7 @@ async function revisar(){
 }
 setInterval(revisar, 45000);
 document.addEventListener("visibilitychange", () => { if(!document.hidden) revisar(); });
-$("btnSalir").onclick = async () => { try { await api({a:"salir"}); } catch(e){} borrarTok(); mov = []; peds = []; estado = {}; stk = []; fman = []; $("who").hidden = true; $("btnUsuarios").hidden = true; render(); mostrarLogin(); $("status").textContent = "Sesión cerrada."; };
+$("btnSalir").onclick = async () => { try { await api({a:"salir"}); } catch(e){} borrarTok(); mov = []; peds = []; estado = {}; stk = []; fman = []; dat = {}; $("who").hidden = true; $("btnUsuarios").hidden = true; render(); mostrarLogin(); $("status").textContent = "Sesión cerrada."; };
 async function abrirUsuarios(){
   try {
     const j = await api({a:"usuarios"});
@@ -511,6 +531,26 @@ const vendMan = m => vendCuenta.get(m.c) || "";
 const ENV = {entregado:"Entregado", pendiente:"Pendiente de recibir", bloqueado:"Bloqueado", recibido:"Recibido"};
 const envDe = m => m.env || "entregado";
 const manEnv = e => fman.filter(m => envDe(m) === e && okV(vendMan(m)));
+const FP = {contado:"Contado", tarjeta:"Tarjeta", dq:"DQ", canje:"Canje"};
+const fpTexto = d => { if(!d || !d.fp) return ""; let t = FP[d.fp]; if(d.fp === "dq" && d.vto) t += " · vto " + fmtDate(d.vto);
+  if(d.fp === "canje"){ t += d.cj === "futuro" ? " · futuro" + (d.vto ? " vto " + fmtDate(d.vto) : "") : d.cj === "disponible" ? " · disponible" : ""; if(d.cereal) t += " · " + d.cereal; } return t; };
+const optSel = (v, cur, txt) => `<option value="${v}"${v === cur ? " selected" : ""}>${txt}</option>`;
+function valorCell(g){
+  const d = dat[g.key] || {};
+  return `<input class="cellin num" type="number" min="0" step="any" inputmode="decimal" placeholder="0" value="${d.valor ? d.valor : ""}" data-dk="${encodeURIComponent(g.key)}" data-f="valor" aria-label="Valor a facturar"${esAdmin() ? "" : " disabled"}>`;
+}
+function fpCell(g){
+  const d = dat[g.key] || {}, k = encodeURIComponent(g.key), dis = esAdmin() ? "" : " disabled";
+  let h = `<select class="cellin" data-dk="${k}" data-f="fp" aria-label="Forma de pago"${dis}><option value="">Elegir…</option>${Object.keys(FP).map(v => optSel(v, d.fp, FP[v])).join("")}</select>`;
+  const fecha = (lbl) => `<label class="mini">${lbl}<input class="cellin" type="date" value="${esc(d.vto || "")}" data-dk="${k}" data-f="vto"${dis}></label>`;
+  if(d.fp === "dq") h += fecha("Vto");
+  if(d.fp === "canje"){
+    h += `<select class="cellin" data-dk="${k}" data-f="cj" aria-label="Tipo de canje"${dis}><option value="">Canje…</option>${optSel("disponible", d.cj, "Disponible")}${optSel("futuro", d.cj, "Futuro")}</select>`;
+    if(d.cj === "futuro") h += fecha("Vto");
+    h += `<input class="cellin" type="text" placeholder="Cereal a entregar" value="${esc(d.cereal || "")}" data-dk="${k}" data-f="cereal" aria-label="Cereal a entregar"${dis}>`;
+  }
+  return `<div class="fpbox">${h}</div>`;
+}
 const pendFact = () => grupos.filter(g => g.neto > 0.0001 && okV(g.vend));
 /* Pendiente de recibir = renglones de pedidos con factura que todavía no figuran como recibidos. Los renglones "entregado p/completo" ya se despacharon y los "no relev.p.entrega" no se tienen en cuenta. */
 const entregada = l => /entregado/i.test(l.st || "");
@@ -630,13 +670,14 @@ function viewModel(q){
   }
   if(view === "facturar"){
     const list = pendFact().filter(g => matchQ(q, [g.c, g.a])).sort((a, b) => (a.old || "9999").localeCompare(b.old || "9999"));
-    return {head:["Cliente","Artículo","Proveedor","Remitido","Facturado","Ya facturado en pedidos sin recibir","Facturado a mano","Saldo a facturar","Remito más antiguo sin facturar","Días","Acciones"], numCols:[3,4,5,6,7,9], noExport:[10],
+    return {head:["Cliente","Artículo","Proveedor","Remitido","Facturado","Ya facturado en pedidos sin recibir","Facturado a mano","Saldo a facturar","Remito más antiguo sin facturar","Días","Valor a facturar","Forma de pago","Acciones"], numCols:[3,4,5,6,7,9], noExport:[12],
       rows:list.map(g => ({cls:"",
         cells:[esc(g.c), esc(g.a), `<span class="mono">${esc(g.provs)}</span>`, `<span class="mono">${fmtN(g.rem)}</span>`, `<span class="mono">${fmtN(g.fac)}</span>`,
           `<span class="mono">${g.cub ? fmtN(g.cub) : "—"}</span>`, `<span class="mono">${g.man ? fmtN(g.man) : "—"}</span>`, `<span class="pill info mono">${fmtN(g.neto)}</span>`, `<span class="mono">${fmtDate(g.old)}</span>`,
           `<span class="mono ${daysSince(g.old) > 30 ? "age old" : ""}">${g.old ? daysSince(g.old) : ""}</span>`,
+          valorCell(g), fpCell(g),
           `<div class="rowact"><button class="btn small" data-a="facturarman" data-id="${encodeURIComponent(g.key)}">Facturado</button><button class="btn small" data-a="vergrupo" data-id="${encodeURIComponent(g.key)}">Ver movimientos</button></div>`],
-        text:[g.c, g.a, g.provs, g.rem, g.fac, g.cub, g.man, g.neto, fmtDate(g.old), g.old ? daysSince(g.old) : ""]}))};
+        text:[g.c, g.a, g.provs, g.rem, g.fac, g.cub, g.man, g.neto, fmtDate(g.old), g.old ? daysSince(g.old) : "", (dat[g.key] || {}).valor || "", fpTexto(dat[g.key])]}))};
   }
   return null;
 }
@@ -677,6 +718,7 @@ function render(){
   renderTabs();
   const isNormal = view === "normal";
   fv.hidden = isNormal;
+  document.body.classList.toggle("vf", view === "facturar" && !$("fFac").value);
   $("btnImportar").hidden = isNormal || !esAdmin(); $("btnMov").hidden = !isNormal || !esAdmin();
   $("fEnt").hidden = view !== "recibir"; $("fBlq").hidden = view !== "bloqueados"; $("fFac").hidden = view !== "facturar";
   $("detalleBox").hidden = !isNormal;
@@ -769,6 +811,19 @@ function action(a, id){
   else if(a === "desbloquear"){ askText("Nota del desbloqueo (opcional)", "", v => setEstado(p.d, {desbl:true, desblFecha:today(), desblNota:v}), true); }
   else if(a === "rebloquear"){ setEstado(p.d, {desbl:false}); }
 }
+document.addEventListener("change", async e => {
+  const el = e.target; if(!el.dataset || !el.dataset.dk) return;
+  const key = decodeURIComponent(el.dataset.dk), f = el.dataset.f;
+  const antes = dat[key] || {};
+  const m = Object.assign({key, valor:0, fp:"", vto:"", cj:"", cereal:""}, antes);
+  if(f === "valor") m.valor = Number(el.value) || 0;
+  else if(f === "fp"){ m.fp = el.value; m.vto = ""; m.cj = ""; m.cereal = ""; }
+  else if(f === "cj"){ m.cj = el.value; if(el.value !== "futuro") m.vto = ""; }
+  else m[f] = el.value.trim();
+  m.ts = Date.now();
+  try { await io.datSet(m); if(f === "fp" || f === "cj") render(); }
+  catch(err){ toast("No se pudo guardar: " + err.message); render(); }
+});
 document.addEventListener("click", e => {
   const t = e.target.closest(".tab");
   if(t){ view = t.dataset.k; render(); return; }

@@ -17,6 +17,8 @@ var SCHEMA = {
                  head: ['Id','Producto','Tipo','Cantidad','Fecha','Nota','Marca de tiempo']},
   FacturasMano: {cols: ['id','key','c','a','fac','q','f','sb','ts','env','envF','bq'], num: ['q','sb','ts'],
                  head: ['Id','Clave','Cliente','Artículo','Factura','Cantidad','Fecha','Saldo al cargar','Marca de tiempo','Estado del envío','Fecha del estado','Tipo de bloqueo']},
+  DatosFact:    {cols: ['key','valor','fp','vto','cj','cereal','ts'], num: ['valor','ts'],
+                 head: ['Clave (cliente|artículo)','Valor a facturar','Forma de pago','Vencimiento','Tipo de canje','Cereal a entregar','Marca de tiempo']},
   Usuarios:     {cols: ['usuario','sal','hash','rol','activo'], num: [], bool: ['activo'],
                  head: ['Usuario','Sal','Clave (hash)','Rol','Activo']},
   Sesiones:     {cols: ['th','usuario','exp'], num: ['exp'], head: ['Token (hash)','Usuario','Vence']}
@@ -60,6 +62,7 @@ function despachar_(b) {
     case 'estadoSet': exigirEscritura_(me); return upsert_('Estado', b.d, b.o, {d: b.d});
     case 'stkSet':   exigirEscritura_(me); return upsert_('Stock', b.m.id, b.m);
     case 'stkDel':   exigirEscritura_(me); return borrar_('Stock', b.id);
+    case 'datSet':   exigirEscritura_(me); return upsert_('DatosFact', b.m.key, b.m);
     case 'facSet':   exigirEscritura_(me); return upsert_('FacturasMano', b.m.id, b.m);
     case 'facDel':   exigirEscritura_(me); return borrar_('FacturasMano', b.id);
     case 'limpiar':  exigirEscritura_(me); return limpiar_();
@@ -147,7 +150,7 @@ function cargar_(me) {
   return {
     ok: true, v: version_(), me: me,
     mov: leer_('Movimientos'), ped: leer_('Pedidos'), estado: est,
-    stk: leer_('Stock'), fman: leer_('FacturasMano')
+    stk: leer_('Stock'), fman: leer_('FacturasMano'), dat: leer_('DatosFact')
   };
 }
 

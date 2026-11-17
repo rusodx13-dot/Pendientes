@@ -58,14 +58,15 @@ function despachar_(b) {
   switch (b.a) {
     case 'ver':      return {ok: true, v: version_(), me: me};
     case 'cargar':   return cargar_(me);
-    case 'append':   exigirEscritura_(me); return append_(b);
-    case 'estadoSet': exigirEscritura_(me); return upsert_('Estado', b.d, b.o, {d: b.d});
-    case 'stkSet':   exigirEscritura_(me); return upsert_('Stock', b.m.id, b.m);
-    case 'stkDel':   exigirEscritura_(me); return borrar_('Stock', b.id);
-    case 'datSet':   exigirEscritura_(me); return upsert_('DatosFact', b.m.key, b.m);
-    case 'facSet':   exigirEscritura_(me); return upsert_('FacturasMano', b.m.id, b.m);
-    case 'facDel':   exigirEscritura_(me); return borrar_('FacturasMano', b.id);
-    case 'limpiar':  exigirEscritura_(me); return limpiar_();
+    case 'append':   exigir_(me, 'append'); return append_(b);
+    case 'estadoSet': exigir_(me, 'estadoSet'); return upsert_('Estado', b.d, b.o, {d: b.d});
+    case 'stkSet':   exigir_(me, 'stkSet'); return upsert_('Stock', b.m.id, b.m);
+    case 'stkDel':   exigir_(me, 'stkDel'); return borrar_('Stock', b.id);
+    case 'datSet':   exigir_(me, 'datSet'); return upsert_('DatosFact', b.m.key, b.m);
+    case 'facSet':   exigir_(me, 'facSet'); return facSet_(me, b.m);
+    case 'facEnv':   exigir_(me, 'facEnv'); return upsert_('FacturasMano', b.m.id, b.m);
+    case 'facDel':   exigir_(me, 'facDel'); return borrar_('FacturasMano', b.id);
+    case 'limpiar':  exigir_(me, 'limpiar'); return limpiar_();
     case 'usuarios': exigirAdmin_(me); return listarUsuarios_();
     case 'usuarioGuardar': exigirAdmin_(me); return guardarUsuario_(b);
     case 'claveCambiar': return cambiarClave_(me, b);
@@ -204,6 +205,18 @@ function upsert_(nombre, clave, obj, extra) {
   return {ok: true, v: subirVersion_()};
 }
 
+/* El vendedor puede cargar facturas a mano, pero no cambiar el estado del envío de una ya cargada. */
+function facSet_(me, m) {
+  if (me.rol !== 'admin') {
+    var def = SCHEMA.FacturasMano, sh = ss_().getSheetByName('FacturasMano'), pos = buscarFila_(sh, m.id);
+    if (pos > 0) {
+      var fila = sh.getRange(pos, 1, 1, def.cols.length).getValues()[0];
+      ['env', 'envF', 'bq'].forEach(function (k) { m[k] = deValor_(def, k, fila[def.cols.indexOf(k)]); });
+    }
+  }
+  return upsert_('FacturasMano', m.id, m);
+}
+
 function borrar_(nombre, clave) {
   var sh = ss_().getSheetByName(nombre), pos = buscarFila_(sh, clave);
   if (pos > 0) sh.deleteRow(pos);
@@ -282,7 +295,17 @@ function salir_(token) {
   return {ok: true};
 }
 
-function exigirEscritura_(me) { if (me.rol !== 'admin') throw pub_('Tu usuario es de solo consulta.', 'permiso'); }
+/* Roles: admin edita todo; vendedor edita Pendientes de facturar y Pedidos; deposito edita Mercadería normal. */
+var ROLES = ['admin', 'vendedor', 'deposito'];
+var NOMBRES_ROL = {admin: 'Administrador', vendedor: 'Vendedor', deposito: 'Depósito', consulta: 'Solo consulta'};
+var PERMISOS = {
+  append: ['admin'], estadoSet: ['admin'], limpiar: ['admin'], facEnv: ['admin'],
+  stkSet: ['admin', 'deposito'], stkDel: ['admin', 'deposito'],
+  datSet: ['admin', 'vendedor'], facSet: ['admin', 'vendedor'], facDel: ['admin', 'vendedor']
+};
+function exigir_(me, accion) {
+  if ((PERMISOS[accion] || []).indexOf(me.rol) < 0) throw pub_('Tu rol (' + (NOMBRES_ROL[me.rol] || me.rol) + ') no puede editar esto.', 'permiso');
+}
 function exigirAdmin_(me) { if (me.rol !== 'admin') throw pub_('Solo el administrador puede hacer esto.', 'permiso'); }
 
 function listarUsuarios_() {
@@ -290,8 +313,9 @@ function listarUsuarios_() {
 }
 
 function guardarUsuario_(b) {
-  var u = String(b.usuario || '').trim().toLowerCase(), c = String(b.clave || ''), rol = b.rol === 'admin' ? 'admin' : 'consulta';
+  var u = String(b.usuario || '').trim().toLowerCase(), c = String(b.clave || ''), rol = String(b.rol || '');
   if (u.length < 3) throw pub_('El usuario necesita al menos 3 letras.');
+  if (ROLES.indexOf(rol) < 0) throw pub_('Elegí un rol: administrador, vendedor o depósito.');
   var existente = usuarios_().filter(function (x) { return x.usuario === u; })[0];
   if (!existente && c.length < 6) throw pub_('La clave necesita al menos 6 caracteres.');
   if (c && c.length < 6) throw pub_('La clave necesita al menos 6 caracteres.');

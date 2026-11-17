@@ -433,30 +433,37 @@ async function api(body){
   return j;
 }
 const esAdmin = () => !!(S.me && S.me.rol === "admin");
+const ROLES = {admin:"Administrador", vendedor:"Vendedor", deposito:"Depósito", consulta:"Solo consulta"};
+/* Permisos: administrador edita todo; vendedor solo Pendientes de facturar y Pedidos; depósito solo Mercadería normal. */
+const puede = area => { const r = S.me && S.me.rol; return r === "admin" || (area === "facturar" && r === "vendedor") || (area === "normal" && r === "deposito"); };
+const PERM_A = {recibir:"todo", norecibir:"todo", desbloquear:"todo", rebloquear:"todo", manrecibir:"todo", mandesbloquear:"todo", importar:"todo", facturarman:"facturar", deshacerfac:"facturar", volverped:"facturar"};
+function aplicarPermisos(){
+  document.querySelectorAll("button[data-a]").forEach(b => { const a = PERM_A[b.dataset.a]; if(a && !puede(a)) b.style.display = "none"; });
+  document.querySelectorAll("button[data-s]").forEach(b => { if(!puede("normal")) b.style.display = "none"; });
+}
 const err = e => new Error(e && (e.error || e.message) || "Error");
-async function escribir(body){
-  if(!esAdmin()) throw new Error("Tu usuario es de solo consulta.");
+async function escribir(body, area){
+  if(!puede(area || "todo")) throw new Error("Tu rol (" + (ROLES[S.me && S.me.rol] || "sin rol") + ") no puede editar esto.");
   try { const j = await api(body); S.v = j.v; return j; }
   catch(e){ if(e && e.code === "conflicto") setTimeout(cargar, 300); throw err(e); }
 }
 io = {
   commit: async (kind, arr, oldLen) => {
     for(let i = oldLen; i < arr.length; i += 1000){
-      await escribir({a:"append", kind, oldLen:i, rows:arr.slice(i, i + 1000)});
+      await escribir({a:"append", kind, oldLen:i, rows:arr.slice(i, i + 1000)}, "todo");
     }
   },
-  setEstado: async (d, o) => { await escribir({a:"estadoSet", d, o}); estado[d] = o; render(); },
-  stkSet: async m => { await escribir({a:"stkSet", m}); stk.push(m); render(); },
-  stkDel: async id => { await escribir({a:"stkDel", id}); stk = stk.filter(x => x.id !== id); render(); },
-  datSet: async m => { await escribir({a:"datSet", m}); dat[m.key] = m; },
-  facSet: async m => { await escribir({a:"facSet", m}); fman = fman.filter(x => x.id !== m.id).concat([m]); render(); },
-  facDel: async id => { await escribir({a:"facDel", id}); fman = fman.filter(x => x.id !== id); render(); },
+  setEstado: async (d, o) => { await escribir({a:"estadoSet", d, o}, "todo"); estado[d] = o; render(); },
+  stkSet: async m => { await escribir({a:"stkSet", m}, "normal"); stk.push(m); render(); },
+  stkDel: async id => { await escribir({a:"stkDel", id}, "normal"); stk = stk.filter(x => x.id !== id); render(); },
+  datSet: async m => { await escribir({a:"datSet", m}, "facturar"); dat[m.key] = m; },
+  facEnv: async m => { await escribir({a:"facEnv", m}, "todo"); fman = fman.filter(x => x.id !== m.id).concat([m]); render(); },
+  facSet: async m => { await escribir({a:"facSet", m}, "facturar"); fman = fman.filter(x => x.id !== m.id).concat([m]); render(); },
+  facDel: async id => { await escribir({a:"facDel", id}, "facturar"); fman = fman.filter(x => x.id !== id); render(); },
 };
 function aplicarSesion(){
-  const ro = !esAdmin();
-  $("who").hidden = false; $("whoName").textContent = S.me.usuario + (ro ? " · solo consulta" : "");
+  $("who").hidden = false; $("whoName").textContent = S.me.usuario + " · " + (ROLES[S.me.rol] || S.me.rol);
   $("btnUsuarios").hidden = !esAdmin();
-  $("btnImportar").hidden = ro;
 }
 const esSubtotal = r => !String(r.a || "").trim() && !String(r.k || "").trim();
 async function cargar(silencioso){
@@ -511,12 +518,12 @@ $("btnSalir").onclick = async () => { try { await api({a:"salir"}); } catch(e){}
 async function abrirUsuarios(){
   try {
     const j = await api({a:"usuarios"});
-    const filas = j.usuarios.map(u => [esc(u.usuario), u.rol === "admin" ? "Administrador" : "Solo consulta", u.activo ? "Sí" : "No",
+    const filas = j.usuarios.map(u => [esc(u.usuario), ROLES[u.rol] || u.rol, u.activo ? "Sí" : "No",
       `<button class="btn small" data-u="${esc(u.usuario)}" data-r="${u.rol}" data-ac="${u.activo ? 1 : 0}">Editar</button>`]);
     showModal("Usuarios", table(["Usuario","Rol","Activo","Acciones"], filas, []) +
       `<h2 class="sec" id="utit">Nuevo usuario</h2><div class="grid">
         <label>Usuario<input id="uu" autocomplete="off"></label><label>Clave (vacía = no cambia)<input id="uc" type="password" autocomplete="new-password"></label>
-        <label>Rol<select id="ur"><option value="consulta">Solo consulta</option><option value="admin">Administrador</option></select></label>
+        <label>Rol<select id="ur"><option value="vendedor">Vendedor (edita Pendientes de facturar y Pedidos)</option><option value="deposito">Depósito (edita Mercadería normal)</option><option value="admin">Administrador (edita todo)</option></select></label>
         <label>Activo<select id="ua"><option value="1">Sí</option><option value="0">No</option></select></label></div>
         <div class="mfoot"><button class="btn primary" id="uOk">Guardar usuario</button></div><div class="sub" id="uErr"></div>`);
     document.querySelectorAll("button[data-u]").forEach(b => b.onclick = () => { $("uu").value = b.dataset.u; $("ur").value = b.dataset.r; $("ua").value = b.dataset.ac; $("uc").value = ""; $("utit").textContent = "Editar " + b.dataset.u; $("uc").focus(); });
@@ -550,10 +557,10 @@ const fpTexto = d => { if(!d || !d.fp) return ""; let t = FP[d.fp]; if(d.fp === 
 const optSel = (v, cur, txt) => `<option value="${v}"${v === cur ? " selected" : ""}>${txt}</option>`;
 function valorCell(g){
   const d = dat[g.key] || {};
-  return `<input class="cellin num" type="number" min="0" step="any" inputmode="decimal" placeholder="0" value="${d.valor ? d.valor : ""}" data-dk="${encodeURIComponent(g.key)}" data-f="valor" aria-label="Valor a facturar"${esAdmin() ? "" : " disabled"}>`;
+  return `<input class="cellin num" type="number" min="0" step="any" inputmode="decimal" placeholder="0" value="${d.valor ? d.valor : ""}" data-dk="${encodeURIComponent(g.key)}" data-f="valor" aria-label="Valor a facturar"${puede("facturar") ? "" : " disabled"}>`;
 }
 function fpCell(g){
-  const d = dat[g.key] || {}, k = encodeURIComponent(g.key), dis = esAdmin() ? "" : " disabled";
+  const d = dat[g.key] || {}, k = encodeURIComponent(g.key), dis = puede("facturar") ? "" : " disabled";
   let h = `<select class="cellin" data-dk="${k}" data-f="fp" aria-label="Forma de pago"${dis}><option value="">Elegir…</option>${Object.keys(FP).map(v => optSel(v, d.fp, FP[v])).join("")}</select>`;
   const fecha = (lbl) => `<label class="mini">${lbl}<input class="cellin" type="date" value="${esc(d.vto || "")}" data-dk="${k}" data-f="vto"${dis}></label>`;
   if(d.fp === "dq") h += fecha("Vto");
@@ -783,13 +790,13 @@ function render(){
   const isNormal = view === "normal";
   fv.hidden = isNormal;
   document.body.classList.toggle("vf", (view === "facturar" && !$("fFac").value) || view === "pedidos");
-  $("btnImportar").hidden = isNormal || !esAdmin(); $("btnMov").hidden = !isNormal || !esAdmin();
+  $("btnImportar").hidden = isNormal || !esAdmin(); $("btnMov").hidden = !isNormal || !puede("normal");
   $("fEnt").hidden = view !== "recibir"; $("fBlq").hidden = view !== "bloqueados"; $("fFac").hidden = view !== "facturar";
   $("detalleBox").hidden = !isNormal;
   $("rowsDet").innerHTML = "";
   $("status").textContent = mov.length || peds.length ? `Base: ${mov.length} movimientos · ${pedidos.length} pedidos con factura` : "Base vacía";
   const q = $("q").value.trim().toLowerCase();
-  if(isNormal){ stockView(q); etiquetar(); aplicarOrden(); return; }
+  if(isNormal){ stockView(q); etiquetar(); aplicarOrden(); aplicarPermisos(); return; }
   if(!mov.length && !peds.length){
     $("thead").innerHTML = "";
     $("rows").innerHTML = `<tr><td><div class="empty">Todavía no hay datos en la base.<br>Importá el reporte de movimientos y el de facturas para empezar.<br><br><button class="btn primary" data-a="importar">Importar reportes</button></div></td></tr>`;
@@ -799,6 +806,7 @@ function render(){
   tableHTML(m);
   etiquetar();
   aplicarOrden();
+  aplicarPermisos();
   const notes = {
     recibir:"Cada renglón es una línea de un pedido con factura que todavía no figura como recibido. Recibir se aplica al pedido completo y pasa solo cuando su factura aparece en un reporte de movimientos, o cuando lo marcás a mano. Si el despacho está bloqueado no se puede recibir.",
     facturar:"Saldo a facturar = remitos (negativos) menos facturas y ajustes (positivos) de los movimientos, por cliente y artículo, menos lo que ya está facturado en pedidos de la pestaña Pendientes de recibir (mismo cliente y misma marca de producto). Incluye al proveedor 12396.",
@@ -828,7 +836,7 @@ function table(head, rows, numCols){
 function showModal(title, body){
   $("modalHost").innerHTML = `<div class="overlay"><div class="modal wide" role="dialog" aria-modal="true"><h2>${title}</h2>${body}<div class="mfoot"><button class="btn primary" id="mClose">Cerrar</button></div></div></div>`;
   $("mClose").onclick = closeModal;
-  etiquetar($("modalHost"));
+  etiquetar($("modalHost")); aplicarPermisos();
 }
 function action(a, id){
   if(a === "importar"){ $("fileInput").click(); return; }
@@ -841,7 +849,7 @@ function action(a, id){
   if(a === "manrecibir" || a === "mandesbloquear"){
     const m = fman.find(x => x.id === id); if(!m) return;
     const nuevo = Object.assign({}, m, a === "manrecibir" ? {env:"recibido"} : {env:"pendiente"}, {envF:today()});
-    io.facSet(nuevo).then(() => toast(a === "manrecibir" ? "Marcada como recibida." : "Desbloqueada: pasa a pendiente de recibir."), e => toast("No se pudo guardar: " + e.message));
+    io.facEnv(nuevo).then(() => toast(a === "manrecibir" ? "Marcada como recibida." : "Desbloqueada: pasa a pendiente de recibir."), e => toast("No se pudo guardar: " + e.message));
     return;
   }
   if(a === "deshacerfac"){

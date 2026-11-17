@@ -64,6 +64,10 @@ button,select,input,textarea{font:inherit;color:inherit}
 .tablebox{background:var(--surface);border:1px solid var(--line);border-radius:8px}
 table{border-collapse:collapse;width:100%}
 th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;font-size:13px}
+.ordbox{display:flex;gap:6px}
+th[data-i]{cursor:pointer;user-select:none}
+th[data-i]:hover{color:var(--ink)}
+th .ind{font-size:10px;margin-left:3px}
 th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:600}
 tr:last-child td{border-bottom:0}
 .mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
@@ -176,6 +180,7 @@ body.vf .wrap{max-width:1500px}
     <select id="fEnt" aria-label="Estado de entrega" hidden style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)">
       <option value="">Todos los estados</option><option value="parcial">Entrega parcial</option><option value="nosum">No suministrado</option>
     </select>
+    <span class="ordbox"><select id="fOrd" aria-label="Ordenar por" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"></select><button class="btn" id="btnDir" title="Cambiar sentido del orden" aria-label="Cambiar sentido del orden">↑</button></span>
   </div>
 
   <div class="tablebox"><table>
@@ -706,6 +711,47 @@ function etiquetar(root){
     t.querySelectorAll("tbody tr").forEach(tr => { if(tr.children.length === hs.length) [...tr.children].forEach((td, i) => td.setAttribute("data-label", hs[i])); });
   });
 }
+/* ---------- Orden por columna (clic en el encabezado, o el selector "Ordenar por") ---------- */
+const ord = {};
+const ordKey = () => view + "|" + (view === "facturar" ? $("fFac").value : "");
+function valorOrden(td){
+  const el = td.querySelector("input,select");
+  if(el){ const t = el.tagName === "SELECT" ? ((el.options[el.selectedIndex] || {}).text || "") : el.value; if(el.type === "number") return t === "" ? null : {n:parseFloat(t)}; return t.trim() === "" || /^(Elegir|Canje)…$/.test(t) ? null : {t:t.trim()}; }
+  const t = td.textContent.trim().replace(/\s+/g, " ");
+  if(t === "" || t === "—") return null;
+  let m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t); if(m) return {n:Number(m[3] + m[2] + m[1])};
+  if(/^-?\d{1,3}(\.\d{3})*(,\d+)?$/.test(t) || /^-?\d+(,\d+)?$/.test(t)) return {n:parseFloat(t.replace(/\./g, "").replace(",", "."))};
+  return {t};
+}
+function aplicarOrden(){
+  const ths = [...document.querySelectorAll("#thead th")], sel = $("fOrd");
+  ths.forEach((th, i) => { if(!/^acciones$/i.test(th.textContent.trim())) th.dataset.i = i; });
+  const cols = ths.map((th, i) => ({i, t:th.textContent.trim()})).filter(c => !/^acciones$/i.test(c.t));
+  const o = ord[ordKey()];
+  sel.innerHTML = `<option value="">Orden original</option>` + cols.map(c => `<option value="${c.i}">${esc(c.t)}</option>`).join("");
+  sel.value = o ? String(o.i) : ""; $("btnDir").textContent = o && o.dir === -1 ? "↓" : "↑"; $("btnDir").disabled = !o;
+  ths.forEach((th, i) => { const x = th.querySelector(".ind"); if(x) x.remove(); if(o && o.i === i){ const sp = document.createElement("span"); sp.className = "ind"; sp.textContent = o.dir === 1 ? "▲" : "▼"; th.appendChild(sp); } });
+  if(!o) return;
+  const body = $("rows"), trs = [...body.querySelectorAll("tr")].filter(tr => tr.children.length > o.i);
+  if(trs.length < 2) return;
+  const claves = trs.map((tr, k) => ({tr, k, v:valorOrden(tr.children[o.i])}));
+  claves.sort((a, b) => {
+    if(!a.v && !b.v) return a.k - b.k; if(!a.v) return 1; if(!b.v) return -1;   /* vacíos siempre al final */
+    let r;
+    if(a.v.n !== undefined && b.v.n !== undefined) r = a.v.n - b.v.n;
+    else r = String(a.v.t !== undefined ? a.v.t : a.v.n).localeCompare(String(b.v.t !== undefined ? b.v.t : b.v.n), "es", {numeric:true, sensitivity:"base"});
+    return r ? r * o.dir : a.k - b.k;
+  });
+  claves.forEach(c => body.appendChild(c.tr));
+}
+function fijarOrden(i, dir){ const k = ordKey(); if(i === "" || i === null) delete ord[k]; else ord[k] = {i:Number(i), dir}; render(); }
+$("thead").addEventListener("click", e => {
+  const th = e.target.closest("th"); if(!th || th.dataset.i === undefined) return;
+  const k = ordKey(), o = ord[k], i = Number(th.dataset.i);
+  if(!o || o.i !== i) fijarOrden(i, 1); else if(o.dir === 1) fijarOrden(i, -1); else fijarOrden("", 1);
+});
+$("fOrd").addEventListener("change", () => { const o = ord[ordKey()]; fijarOrden($("fOrd").value, o ? o.dir : 1); });
+$("btnDir").addEventListener("click", () => { const o = ord[ordKey()]; if(o) fijarOrden(o.i, -o.dir); });
 function tableHTML(m){
   const num = new Set(m.numCols || []);
   $("thead").innerHTML = "<tr>" + m.head.map((h, i) => `<th class="${num.has(i) ? "num" : ""}">${h}</th>`).join("") + "</tr>";
@@ -743,7 +789,7 @@ function render(){
   $("rowsDet").innerHTML = "";
   $("status").textContent = mov.length || peds.length ? `Base: ${mov.length} movimientos · ${pedidos.length} pedidos con factura` : "Base vacía";
   const q = $("q").value.trim().toLowerCase();
-  if(isNormal){ stockView(q); etiquetar(); return; }
+  if(isNormal){ stockView(q); etiquetar(); aplicarOrden(); return; }
   if(!mov.length && !peds.length){
     $("thead").innerHTML = "";
     $("rows").innerHTML = `<tr><td><div class="empty">Todavía no hay datos en la base.<br>Importá el reporte de movimientos y el de facturas para empezar.<br><br><button class="btn primary" data-a="importar">Importar reportes</button></div></td></tr>`;
@@ -752,6 +798,7 @@ function render(){
   const m = viewModel(q);
   tableHTML(m);
   etiquetar();
+  aplicarOrden();
   const notes = {
     recibir:"Cada renglón es una línea de un pedido con factura que todavía no figura como recibido. Recibir se aplica al pedido completo y pasa solo cuando su factura aparece en un reporte de movimientos, o cuando lo marcás a mano. Si el despacho está bloqueado no se puede recibir.",
     facturar:"Saldo a facturar = remitos (negativos) menos facturas y ajustes (positivos) de los movimientos, por cliente y artículo, menos lo que ya está facturado en pedidos de la pestaña Pendientes de recibir (mismo cliente y misma marca de producto). Incluye al proveedor 12396.",

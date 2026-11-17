@@ -64,7 +64,10 @@ button,select,input,textarea{font:inherit;color:inherit}
 .tablebox{background:var(--surface);border:1px solid var(--line);border-radius:8px}
 table{border-collapse:collapse;width:100%}
 th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;font-size:13px}
-.ordbox{display:flex;gap:6px}
+.sortbar{display:none;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 10px}
+.sortbar .lbl{font-size:12px;color:var(--muted);margin-right:2px}
+.sortbar .chip{font:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink);cursor:pointer}
+.sortbar .chip.on{background:var(--ink);color:var(--surface);border-color:var(--ink)}
 th[data-i]{cursor:pointer;user-select:none}
 th[data-i]:hover{color:var(--ink)}
 th .ind{font-size:10px;margin-left:3px}
@@ -91,6 +94,7 @@ tr.blocked td:first-child{box-shadow:inset 4px 0 0 var(--crit)}
 .wrap{overflow-x:hidden}
 body.vf .wrap{max-width:1500px}
 @media (max-width:1180px){
+  .sortbar{display:flex}
   .tablebox{background:none;border:0}
   .tablebox thead{display:none}
   .tablebox table,.tablebox tbody,.tablebox tr,.tablebox td{display:block;width:100%}
@@ -103,6 +107,7 @@ body.vf .wrap{max-width:1500px}
   .tablebox td .fpbox{align-items:stretch;min-width:60%}
 }
 @media (min-width:1181px) and (max-width:1500px){
+  body.vf .sortbar{display:flex}
   body.vf .tablebox{background:none;border:0}
   body.vf .tablebox thead{display:none}
   body.vf .tablebox table,.tablebox tbody,.tablebox tr,.tablebox td{display:block;width:100%}
@@ -180,9 +185,9 @@ body.vf .wrap{max-width:1500px}
     <select id="fEnt" aria-label="Estado de entrega" hidden style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)">
       <option value="">Todos los estados</option><option value="parcial">Entrega parcial</option><option value="nosum">No suministrado</option>
     </select>
-    <span class="ordbox"><select id="fOrd" aria-label="Ordenar por" style="padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"></select><button class="btn" id="btnDir" title="Cambiar sentido del orden" aria-label="Cambiar sentido del orden">↑</button></span>
   </div>
 
+  <div class="sortbar" id="sortbar"></div>
   <div class="tablebox"><table>
     <thead id="thead"></thead>
     <tbody id="rows"></tbody>
@@ -724,12 +729,11 @@ function valorOrden(td){
   return {t};
 }
 function aplicarOrden(){
-  const ths = [...document.querySelectorAll("#thead th")], sel = $("fOrd");
+  const ths = [...document.querySelectorAll("#thead th")];
   ths.forEach((th, i) => { if(!/^acciones$/i.test(th.textContent.trim())) th.dataset.i = i; });
   const cols = ths.map((th, i) => ({i, t:th.textContent.trim()})).filter(c => !/^acciones$/i.test(c.t));
   const o = ord[ordKey()];
-  sel.innerHTML = `<option value="">Orden original</option>` + cols.map(c => `<option value="${c.i}">${esc(c.t)}</option>`).join("");
-  sel.value = o ? String(o.i) : ""; $("btnDir").textContent = o && o.dir === -1 ? "↓" : "↑"; $("btnDir").disabled = !o;
+  $("sortbar").innerHTML = `<span class="lbl">Ordenar por:</span>` + cols.map(c => `<button class="chip${o && o.i === c.i ? " on" : ""}" data-i="${c.i}">${esc(c.t)}${o && o.i === c.i ? (o.dir === 1 ? " ▲" : " ▼") : ""}</button>`).join("");
   ths.forEach((th, i) => { const x = th.querySelector(".ind"); if(x) x.remove(); if(o && o.i === i){ const sp = document.createElement("span"); sp.className = "ind"; sp.textContent = o.dir === 1 ? "▲" : "▼"; th.appendChild(sp); } });
   if(!o) return;
   const body = $("rows"), trs = [...body.querySelectorAll("tr")].filter(tr => tr.children.length > o.i);
@@ -745,13 +749,9 @@ function aplicarOrden(){
   claves.forEach(c => body.appendChild(c.tr));
 }
 function fijarOrden(i, dir){ const k = ordKey(); if(i === "" || i === null) delete ord[k]; else ord[k] = {i:Number(i), dir}; render(); }
-$("thead").addEventListener("click", e => {
-  const th = e.target.closest("th"); if(!th || th.dataset.i === undefined) return;
-  const k = ordKey(), o = ord[k], i = Number(th.dataset.i);
-  if(!o || o.i !== i) fijarOrden(i, 1); else if(o.dir === 1) fijarOrden(i, -1); else fijarOrden("", 1);
-});
-$("fOrd").addEventListener("change", () => { const o = ord[ordKey()]; fijarOrden($("fOrd").value, o ? o.dir : 1); });
-$("btnDir").addEventListener("click", () => { const o = ord[ordKey()]; if(o) fijarOrden(o.i, -o.dir); });
+function alternarOrden(i){ const o = ord[ordKey()]; if(!o || o.i !== i) fijarOrden(i, 1); else if(o.dir === 1) fijarOrden(i, -1); else fijarOrden("", 1); }
+$("thead").addEventListener("click", e => { const th = e.target.closest("th"); if(th && th.dataset.i !== undefined) alternarOrden(Number(th.dataset.i)); });
+$("sortbar").addEventListener("click", e => { const b = e.target.closest("button[data-i]"); if(b) alternarOrden(Number(b.dataset.i)); });
 function tableHTML(m){
   const num = new Set(m.numCols || []);
   $("thead").innerHTML = "<tr>" + m.head.map((h, i) => `<th class="${num.has(i) ? "num" : ""}">${h}</th>`).join("") + "</tr>";

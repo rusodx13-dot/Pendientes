@@ -159,6 +159,16 @@ body.vf .wrap{max-width:1500px}
 .sync.err{color:var(--crit);font-weight:600}
 @keyframes lat{to{opacity:.3}}
 tr.mas td{text-align:center;padding:14px}
+.selcli{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+.selcli input{width:18px;height:18px;margin:1px 0 0;flex:none;accent-color:var(--accent)}
+tr.sel td{background:var(--accent-soft)}
+.selbar{position:sticky;bottom:10px;z-index:20;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;margin:12px 0;padding:10px 14px;border:1px solid var(--accent);border-radius:8px;background:var(--surface);box-shadow:0 4px 18px rgba(0,0,0,.12)}
+.selbar .txt{flex:1 1 220px;font-size:14px}
+.selbar .btns{display:flex;flex-wrap:wrap;gap:6px}
+.facl{width:100%;border-collapse:collapse;font-size:13px;margin:4px 0 8px}
+.facl th,.facl td{padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+.facl td.num,.facl th.num{text-align:right}
+.facl input{width:100px;text-align:right}
 </style>
 </head>
 <body>
@@ -197,6 +207,7 @@ tr.mas td{text-align:center;padding:14px}
     <thead id="thead"></thead>
     <tbody id="rows"></tbody>
   </table></div>
+  <div class="selbar" id="selbar" hidden></div>
 
   <div id="detalleBox" hidden>
     <h2 class="sec">Movimientos de stock</h2>
@@ -409,7 +420,8 @@ let pedidos = [], grupos = [], sinRet = [], grupoPorKey = new Map();
 let arch = {fc:[], h:[], v:[]};      // claves de movimientos archivados (para no perder el cruce de facturas ni duplicar al importar)
 let sucio = true;                    // hay que recalcular grupos y pedidos
 const cambio = () => { sucio = true; };
-const PAG = 100; let limite = PAG;   // filas que se dibujan por tramo
+const PAG = 100; let limite = PAG;
+const selPed = new Set();            // líneas de Pedidos elegidas para una misma factura   // filas que se dibujan por tramo
 const VIEWS = [
   {k:"recibir", l:"Pendientes de recibir"},
   {k:"facturar", l:"Pendientes de facturar"},
@@ -852,8 +864,8 @@ function viewModel(q){
   if(view === "pedidos"){
     const list = pedFact().filter(g => matchQ(q, [g.c, g.a, fpTexto(dat[g.key])])).sort((a, b) => (a.ult || "9999").localeCompare(b.ult || "9999"));
     return {head:["Cliente","Artículo","Proveedor","Cantidad a facturar","Valor a facturar","Forma de pago","Último remito sin facturar","Días","Acciones"], numCols:[3,7], noExport:[8],
-      rows:list.map(g => ({cls:"", key:g.key, iv:4,
-        cells:[esc(g.c), esc(g.a), `<span class="mono">${esc(g.provs)}</span>`, `<span class="pill info mono">${fmtN(g.neto)}</span>`, valorCell(g), fpCell(g), `<span class="mono">${fmtDate(g.ult)}</span>`,
+      rows:list.map(g => ({cls:selPed.has(g.key) ? "sel" : "", key:g.key, iv:4,
+        cells:[puede("facturar") ? `<label class="selcli"><input type="checkbox" data-sel="${encodeURIComponent(g.key)}" ${selPed.has(g.key) ? "checked" : ""} aria-label="Seleccionar para facturar juntas"><span>${esc(g.c)}</span></label>` : esc(g.c), esc(g.a), `<span class="mono">${esc(g.provs)}</span>`, `<span class="pill info mono">${fmtN(g.neto)}</span>`, valorCell(g), fpCell(g), `<span class="mono">${fmtDate(g.ult)}</span>`,
           `<span class="mono ${daysSince(g.ult) > 30 ? "age old" : ""}">${g.ult ? daysSince(g.ult) : ""}</span>`,
           `<div class="rowact"><button class="btn small" data-a="facturarman" data-id="${encodeURIComponent(g.key)}">Facturado</button><button class="btn small" data-a="vergrupo" data-id="${encodeURIComponent(g.key)}">Ver movimientos</button><button class="btn small" data-a="volverped" data-id="${encodeURIComponent(g.key)}">Volver a pendientes</button></div>`],
         text:[g.c, g.a, g.provs, g.neto, (dat[g.key] || {}).valor || "", fpTexto(dat[g.key]), fmtDate(g.ult), g.ult ? daysSince(g.ult) : ""]}))};
@@ -977,6 +989,7 @@ function render(){
   $("rowsDet").innerHTML = "";
   $("status").textContent = mov.length || peds.length ? `Base: ${mov.length} movimientos · ${pedidos.length} pedidos con factura` : "Base vacía";
   const q = $("q").value.trim().toLowerCase();
+  if(view !== "pedidos") $("selbar").hidden = true;
   if(isNormal){ tabla = null; stockView(q); etiquetar(); aplicarOrden(true); aplicarPermisos(); return; }
   if(!mov.length && !peds.length){
     $("thead").innerHTML = "";
@@ -989,6 +1002,7 @@ function render(){
   aplicarOrden(false);
   aplicarPermisos();
   $("foot").textContent = pie(m.rows.length, q);
+  pintarSel();
 }
 function pie(n, q){
   const notes = {
@@ -1108,14 +1122,54 @@ document.addEventListener("click", e => {
   }
 });
 
+/* ---------------- Varias líneas de Pedidos en una misma factura ---------------- */
+function lineasSel(){
+  const vivas = new Map(pedFact().map(g => [g.key, g]));
+  [...selPed].forEach(k => { if(!vivas.has(k)) selPed.delete(k); });   // las ya facturadas o que volvieron a pendientes salen de la selección
+  return [...selPed].map(k => vivas.get(k));
+}
+function pintarSel(){
+  const bar = $("selbar");
+  if(view !== "pedidos" || !puede("facturar")){ bar.hidden = true; return; }
+  const ls = lineasSel();
+  if(!ls.length){ bar.hidden = true; bar.innerHTML = ""; return; }
+  const cli = ls[0].c, total = ls.reduce((t, g) => t + ((dat[g.key] || {}).valor || 0), 0);
+  const otras = pedFact().filter(g => g.c === cli && !selPed.has(g.key)).length;
+  bar.hidden = false;
+  bar.innerHTML = `<div class="txt"><b>${ls.length} ${ls.length === 1 ? "línea" : "líneas"}</b> de ${esc(cli)} · Valor total <b class="mono">${fmtN(total)}</b></div>
+    <div class="btns">${otras ? `<button class="btn small" id="selTodas">Agregar las otras ${otras} de este cliente</button>` : ""}<button class="btn small" id="selNo">Quitar selección</button><button class="btn small primary" id="selFac">Facturar juntas</button></div>`;
+}
+document.addEventListener("change", e => {
+  const el = e.target; if(!el.dataset || !el.dataset.sel) return;
+  const key = decodeURIComponent(el.dataset.sel), g = grupoPorKey.get(key);
+  if(el.checked){
+    const ls = lineasSel();
+    if(g && ls.length && ls[0].c !== g.c){ el.checked = false; toast("Solo se pueden juntar líneas del mismo cliente (" + ls[0].c + ")."); return; }
+    selPed.add(key);
+  } else selPed.delete(key);
+  const tr = el.closest("tr"); if(tr) tr.classList.toggle("sel", el.checked);
+  pintarSel();
+});
+document.addEventListener("click", e => {
+  const b = e.target.closest("#selNo,#selTodas,#selFac"); if(!b) return;
+  if(b.id === "selNo"){ selPed.clear(); render(); return; }
+  if(b.id === "selTodas"){ const ls = lineasSel(); if(ls.length) pedFact().filter(g => g.c === ls[0].c).forEach(g => selPed.add(g.key)); render(); return; }
+  if(b.id === "selFac"){ const ls = lineasSel(); if(ls.length) openFacMan(ls); }
+});
+
 /* ---------------- Factura cargada a mano ---------------- */
-function openFacMan(g){
+/* Una factura para una línea (g) o para varias líneas del mismo cliente (array). Cada línea queda como factura a mano con el mismo número. */
+function openFacMan(sel){
+  const ls = Array.isArray(sel) ? sel : [sel], uno = ls.length === 1, g = ls[0];
+  const filas = ls.map((x, i) => `<tr><td>${esc(x.a)}</td><td class="num mono">${fmtN(x.neto)}</td><td class="num mono">${fmtN((dat[x.key] || {}).valor || 0)}</td>
+    <td class="num"><input type="number" min="0" step="any" data-i="${i}" class="fm_ql" value="${x.neto}"></td></tr>`).join("");
   $("modalHost").innerHTML = `<div class="overlay"><div class="modal" role="dialog" aria-modal="true">
-    <h2>Marcar como facturado</h2>
-    <p class="note">${esc(g.c)} · ${esc(g.a)}<br>Saldo a facturar: ${fmtN(g.neto)}</p>
+    <h2>${uno ? "Marcar como facturado" : "Facturar " + ls.length + " líneas juntas"}</h2>
+    <p class="note">${esc(g.c)}${uno ? " · " + esc(g.a) + "<br>Saldo a facturar: " + fmtN(g.neto) : ""}</p>
+    ${uno ? "" : `<table class="facl"><thead><tr><th>Artículo</th><th class="num">Saldo</th><th class="num">Valor</th><th class="num">Cantidad facturada</th></tr></thead><tbody>${filas}</tbody></table>`}
     <div class="grid">
       <label class="full">N° de factura<input id="fm_fac" autocomplete="off" placeholder="Ej. 3014-0788"></label>
-      <label>Cantidad facturada<input id="fm_q" type="number" min="0" step="any" value="${g.neto}"></label>
+      ${uno ? `<label>Cantidad facturada<input id="fm_q" type="number" min="0" step="any" value="${g.neto}"></label>` : ""}
       <label>Fecha<input id="fm_f" type="date" value="${today()}"></label>
       <label class="full">Estado del envío<select id="fm_env"><option value="">Elegí el estado…</option><option value="entregado">Entregado</option><option value="pendiente">Pendiente de recibir</option><option value="bloqueado">Bloqueado</option></select></label>
       <label class="full" id="fm_bqw" hidden>Tipo de bloqueo (opcional)<input id="fm_bq" list="fm_bql" autocomplete="off" placeholder="Ej. Cobranzas"><datalist id="fm_bql">${[...new Set(pedidos.filter(p => p.bd).map(p => p.bd))].map(t => `<option value="${esc(t)}">`).join("")}</datalist></label>
@@ -1124,16 +1178,23 @@ function openFacMan(g){
   $("fm_fac").focus();
   $("fm_env").onchange = () => { $("fm_bqw").hidden = $("fm_env").value !== "bloqueado"; };
   $("fmNo").onclick = closeModal;
-  $("fmOk").onclick = async () => {
-    const fac = $("fm_fac").value.trim(), q = Number($("fm_q").value);
+  $("fmOk").onclick = () => {
+    const fac = $("fm_fac").value.trim();
     if(!fac){ toast("Escribí el número de factura."); $("fm_fac").focus(); return; }
-    if(!(q > 0)){ toast("Ingresá una cantidad mayor a 0."); $("fm_q").focus(); return; }
-    if(q > g.neto + 0.0001){ toast("La cantidad supera el saldo a facturar (" + fmtN(g.neto) + ")."); return; }
+    const qs = uno ? [Number($("fm_q").value)] : [...document.querySelectorAll(".fm_ql")].map(x => Number(x.value));
+    for(let i = 0; i < ls.length; i++){
+      const inp = uno ? $("fm_q") : document.querySelector(`.fm_ql[data-i="${i}"]`);
+      if(!(qs[i] > 0)){ toast("Ingresá una cantidad mayor a 0" + (uno ? "." : " para " + ls[i].a + ".")); inp.focus(); return; }
+      if(qs[i] > ls[i].neto + 0.0001){ toast("La cantidad supera el saldo a facturar" + (uno ? "" : " de " + ls[i].a) + " (" + fmtN(ls[i].neto) + ")."); inp.focus(); return; }
+    }
     const env = $("fm_env").value;
     if(!env){ toast("Elegí el estado del envío."); $("fm_env").focus(); return; }
-    const m = {id:uid(), key:g.key, c:g.c, a:g.a, fac, q, f:$("fm_f").value || today(), sb:g.saldo, ts:Date.now(), env, envF:today(), bq:env === "bloqueado" ? $("fm_bq").value.trim() : ""};
+    const f = $("fm_f").value || today(), bq = env === "bloqueado" ? $("fm_bq").value.trim() : "", ts = Date.now();
     closeModal();
-    if(io.facSet(m)) toast("Factura cargada.");
+    let n = 0;
+    ls.forEach((x, i) => { if(io.facSet({id:uid(), key:x.key, c:x.c, a:x.a, fac, q:qs[i], f, sb:x.saldo, ts, env, envF:today(), bq})){ n++; selPed.delete(x.key); } });
+    if(n) toast(uno ? "Factura cargada." : "Factura " + fac + " cargada en " + n + " líneas.");
+    pintarSel();
   };
 }
 

@@ -247,6 +247,12 @@ function refKey(ref){
   const m = String(ref || "").match(/^\s*(\d{4})\s*[A-Za-z]?\s*0*(\d+)\s*$/);
   return m ? m[1] + "-" + parseInt(m[2], 10) : "";
 }
+/* Número de factura escrito a mano ("3014-0788", "3014A00000788", "3014 788") -> "3014-788" */
+function facKey(s){
+  const k = refKey(s); if(k) return k;
+  const m = String(s || "").match(/^\s*(\d{3,4})\s*[-\s\/A-Za-z]\s*0*(\d+)\s*$/);
+  return m ? m[1].padStart(4, "0") + "-" + parseInt(m[2], 10) : "";
+}
 function headerMap(o){ const m = {}; Object.keys(o || {}).forEach(k => m[norm(k)] = k); return m; }
 function detect(objs){
   if(!objs.length) return null;
@@ -700,6 +706,9 @@ async function archivar(){
 function fcTodas(m){ const s = fcSetOf(m); arch.fc.forEach(k => s.add(k)); return s; }
 function derive(){
   pedidos = buildPedidos(peds, estado, fcTodas(mov));
+  /* Facturas a mano: cuando el reporte de facturación trae esa factura (Referencia), toman su número de pedido. */
+  const porRef = new Map(); pedidos.forEach(p => { if(p.key && !porRef.has(p.key)) porRef.set(p.key, p); });
+  pedDeMan = new Map(); fman.forEach(m => { const p = porRef.get(facKey(m.fac)); if(p) pedDeMan.set(m.id, p); });
   grupos = aplicarPedidos(buildGrupos(mov), pedidos, fman);
   sinRet = sinRetirar(grupos, pedidos);
   /* Vendedor: sale del reporte de movimientos (por cuenta). A los pedidos se les asigna por nombre de cliente. */
@@ -711,13 +720,14 @@ function derive(){
   grupos.forEach(g => { g.vend = vendCuenta.get(g.c) || ""; });
   sinRet.forEach(x => { x.vend = vendPorTokens(x.ct); });
 }
-let vendCuenta = new Map(), vendTab = [];
+let vendCuenta = new Map(), vendTab = [], pedDeMan = new Map();
+const pedMan = m => pedDeMan.get(m.id);
 const vendPorTokens = ct => { const x = vendTab.find(t => sameClient(ct, t.ct)); return x ? x.v : ""; };
 const okV = v => { const f = $("fVend").value; return !f || (f === "__sin" ? !v : v === f); };
 const vendMan = m => vendCuenta.get(m.c) || "";
 const ENV = {entregado:"Entregado", pendiente:"Pendiente de recibir", bloqueado:"Bloqueado", recibido:"Recibido"};
 const envDe = m => m.env || "entregado";
-const manEnv = e => fman.filter(m => envDe(m) === e && okV(vendMan(m)));
+const manEnv = e => fman.filter(m => !pedMan(m) && envDe(m) === e && okV(vendMan(m)));
 const FP = {contado:"Contado", tarjeta:"Tarjeta", dq:"DQ", canje:"Canje"};
 const fpTexto = d => { if(!d || !d.fp) return ""; let t = FP[d.fp]; if(d.fp === "dq" && d.vto) t += " · vto " + fmtDate(d.vto);
   if(d.fp === "canje"){ t += d.cj === "futuro" ? " · futuro" + (d.vto ? " vto " + fmtDate(d.vto) : "") : d.cj === "disponible" ? " · disponible" : ""; if(d.cereal) t += " · " + d.cereal; } return t; };
@@ -844,13 +854,15 @@ function viewModel(q){
         text:[p.ref, p.d, fmtDate(p.cr), p.cli, p.bd, p.pend, daysSince(p.cr)]})))};
   }
   if(view === "facturar" && $("fFac").value === "manual"){
-    const list = fman.filter(m => okV(vendMan(m)) && matchQ(q, [m.c, m.a, m.fac])).sort((a, b) => (b.ts || 0) - (a.ts || 0));
-    const pillEnv = m => { const e = envDe(m); return `<span class="pill ${e === "bloqueado" ? "crit" : e === "pendiente" ? "warn" : "ok"}">${ENV[e]}${e === "bloqueado" && m.bq ? " · " + esc(m.bq) : ""}</span>`; };
-    const accEnv = m => { const e = envDe(m); return `<div class="rowact">${e === "pendiente" ? `<button class="btn small" data-a="manrecibir" data-id="${esc(m.id)}">Recibir</button>` : e === "bloqueado" ? `<button class="btn small" data-a="mandesbloquear" data-id="${esc(m.id)}">Desbloquear</button>` : ""}<button class="btn small danger" data-a="deshacerfac" data-id="${esc(m.id)}">Deshacer</button></div>`; };
-    return {head:["Cliente","Artículo","Factura","Cantidad","Fecha","Estado del envío","Acciones"], numCols:[3], noExport:[6],
+    const list = fman.filter(m => okV(vendMan(m)) && matchQ(q, [m.c, m.a, m.fac, (pedMan(m) || {}).d])).sort((a, b) => (b.ts || 0) - (a.ts || 0));
+    const pedCell = m => { const p = pedMan(m); return p ? `<button class="btn small mono" data-a="verped" data-id="${esc(p.d)}" title="Ver pedido">${esc(p.d)}</button>` : `<span class="pill mute">Sin pedido aún</span>`; };
+    const pillEnv = m => { const p = pedMan(m); if(p) return `<span class="pill ${p.bloqueado ? "crit" : p.recibido ? "ok" : "info"}">Según pedido: ${p.bloqueado ? "Bloqueado" + (p.bd ? " · " + esc(p.bd) : "") : p.recibido ? "Recibido" : p.pend > 0 ? "Pendiente de recibir" : "Entregado"}</span>`;
+      const e = envDe(m); return `<span class="pill ${e === "bloqueado" ? "crit" : e === "pendiente" ? "warn" : "ok"}">${ENV[e]}${e === "bloqueado" && m.bq ? " · " + esc(m.bq) : ""}</span>`; };
+    const accEnv = m => { const e = pedMan(m) ? "" : envDe(m); return `<div class="rowact">${e === "pendiente" ? `<button class="btn small" data-a="manrecibir" data-id="${esc(m.id)}">Recibir</button>` : e === "bloqueado" ? `<button class="btn small" data-a="mandesbloquear" data-id="${esc(m.id)}">Desbloquear</button>` : ""}<button class="btn small danger" data-a="deshacerfac" data-id="${esc(m.id)}">Deshacer</button></div>`; };
+    return {head:["Cliente","Artículo","Factura","Pedido","Cantidad","Fecha","Estado del envío","Acciones"], numCols:[4], noExport:[7],
       rows:list.map(m => ({cls:"",
-        cells:[esc(m.c), esc(m.a), `<span class="mono">${esc(m.fac)}</span>`, `<span class="mono">${fmtN(m.q)}</span>`, `<span class="mono">${fmtDate(m.f)}</span>`, pillEnv(m), accEnv(m)],
-        text:[m.c, m.a, m.fac, m.q, fmtDate(m.f), ENV[envDe(m)] + (m.bq ? " · " + m.bq : "")]}))};
+        cells:[esc(m.c), esc(m.a), `<span class="mono">${esc(m.fac)}</span>`, pedCell(m), `<span class="mono">${fmtN(m.q)}</span>`, `<span class="mono">${fmtDate(m.f)}</span>`, pillEnv(m), accEnv(m)],
+        text:[m.c, m.a, m.fac, (pedMan(m) || {}).d || "", m.q, fmtDate(m.f), pedMan(m) ? "Según pedido" : ENV[envDe(m)] + (m.bq ? " · " + m.bq : "")]}))};
   }
   if(view === "facturar" && $("fFac").value === "sinretirar"){
     const list = sinRet.filter(x => okV(x.vend) && matchQ(q, [x.cli, x.prod]));
